@@ -418,6 +418,7 @@ private:
   title_type icon_name;
   title_type window_title;
   title_type clipboard;
+  unsigned int clipboard_seq;
   unsigned int bell_count;
   bool title_initialized; /* true if the window title has been set via an OSC */
 
@@ -498,10 +499,15 @@ public:
   bool is_title_initialized( void ) const { return title_initialized; }
   void set_icon_name( const title_type& s ) { icon_name = s; }
   void set_window_title( const title_type& s ) { window_title = s; }
-  void set_clipboard( const title_type& s ) { clipboard = s; }
+  void set_clipboard( const title_type& s )
+  {
+    clipboard = s;
+    clipboard_seq++;
+  }
   const title_type& get_icon_name( void ) const { return icon_name; }
   const title_type& get_window_title( void ) const { return window_title; }
   const title_type& get_clipboard( void ) const { return clipboard; }
+  unsigned int get_clipboard_seq( void ) const { return clipboard_seq; }
 
   void prefix_window_title( const title_type& s );
 
@@ -516,7 +522,7 @@ public:
   bool operator==( const Framebuffer& x ) const
   {
     return ( rows == x.rows ) && ( window_title == x.window_title ) && ( clipboard == x.clipboard )
-           && ( bell_count == x.bell_count ) && ( ds == x.ds );
+           && ( clipboard_seq == x.clipboard_seq ) && ( bell_count == x.bell_count ) && ( ds == x.ds );
   }
 };
 }

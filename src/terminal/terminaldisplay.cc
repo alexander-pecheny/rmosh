@@ -102,9 +102,10 @@ std::string Display::new_frame( bool initialized, const Framebuffer& last, const
     }
   }
 
-  /* has clipboard changed? */
-  if ( f.get_clipboard() != frame.last_frame.get_clipboard() ) {
-    frame.append( "\033]52;c;" );
+  /* has clipboard been set or queried? (gated on initialized to avoid replaying
+     a stale copy/query when a client attaches or repaints) */
+  if ( initialized && f.get_clipboard_seq() != frame.last_frame.get_clipboard_seq() ) {
+    frame.append( "\033]52;" );
     const title_type& clipboard( f.get_clipboard() );
     for ( title_type::const_iterator i = clipboard.begin(); i != clipboard.end(); i++ ) {
       frame.append( *i );
