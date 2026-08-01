@@ -8,7 +8,7 @@
 
 use mosh_protobufs::transport::Instruction;
 
-use crate::connection::{Connection, Received, RecvError};
+use crate::connection::{Connection, RecvError};
 use crate::fragment::{Fragment, FragmentAssembly};
 use crate::packet::MOSH_PROTOCOL_VERSION;
 use crate::sender::{SyncState, TransportSender};
