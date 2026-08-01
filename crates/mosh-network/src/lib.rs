@@ -10,6 +10,7 @@ pub mod connection;
 pub mod fragment;
 pub mod packet;
 pub mod sender;
+pub mod transport;
 
 /// A state diff that could not be applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
