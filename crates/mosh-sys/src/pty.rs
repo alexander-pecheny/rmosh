@@ -319,6 +319,49 @@ pub fn poll_readable(fds: &[RawFd], timeout_ms: i32) -> std::io::Result<Vec<usiz
         .collect())
 }
 
+/// Spawn `cmd` with its stdout and stderr joined into the single pipe returned.
+///
+/// The launcher needs this because the two halves of the ssh handshake arrive on
+/// different streams: the server's `MOSH CONNECT` on stdout, and the proxy's `MOSH IP`
+/// on stderr. The Perl merged them with `open(STDERR, ">&STDOUT")` for the same reason.
+pub fn spawn_with_merged_output(
+    cmd: &mut std::process::Command,
+) -> std::io::Result<(std::process::Child, std::fs::File)> {
+    use std::os::fd::FromRawFd;
+
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: fds is a live array of two ints, which is what pipe() writes.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: pipe() just gave us both descriptors and no one else holds them.
+    let (read, write) = unsafe {
+        (
+            std::os::fd::OwnedFd::from_raw_fd(fds[0]),
+            std::os::fd::OwnedFd::from_raw_fd(fds[1]),
+        )
+    };
+    // Neither end should survive into the child under its own number; the dup2 that
+    // installs stdout and stderr clears the flag on the copies it makes.
+    for fd in [&read, &write] {
+        set_cloexec(fd)?;
+    }
+
+    cmd.stdout(std::process::Stdio::from(write.try_clone()?));
+    cmd.stderr(std::process::Stdio::from(write));
+    let child = cmd.spawn()?;
+    Ok((child, std::fs::File::from(read)))
+}
+
+fn set_cloexec(fd: &std::os::fd::OwnedFd) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: fd is owned and open for the duration of the call.
+    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

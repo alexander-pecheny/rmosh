@@ -19,6 +19,10 @@ pub struct Opts {
     pub bind_ip: Option<String>,
     pub help: bool,
     pub version: bool,
+    /// Run as the ssh ProxyCommand, whose job is to report the resolved address.
+    pub fake_proxy: bool,
+    /// How to learn the address the session runs over: proxy, remote or local.
+    pub remote_ip: String,
     /// host, or user@host.
     pub userhost: Option<String>,
     /// A command to run instead of the login shell.
@@ -41,6 +45,8 @@ impl Default for Opts {
             bind_ip: None,
             help: false,
             version: false,
+            fake_proxy: false,
+            remote_ip: "proxy".into(),
             userhost: None,
             command: Vec::new(),
         }
@@ -80,6 +86,7 @@ impl Predict {
 pub enum OptError {
     BadPredict(String),
     MissingValue(String),
+    BadRemoteIp(String),
 }
 
 impl std::fmt::Display for OptError {
@@ -90,6 +97,10 @@ impl std::fmt::Display for OptError {
                 "Unknown prediction mode {v}. Choose one of: always, never, adaptive, experimental"
             ),
             OptError::MissingValue(o) => write!(f, "Option {o} requires a value"),
+            OptError::BadRemoteIp(v) => write!(
+                f,
+                "Unknown parameter {v}. Choose one of: local, remote, proxy"
+            ),
         }
     }
 }
@@ -164,6 +175,15 @@ pub fn parse(argv: &[String]) -> Result<Opts, OptError> {
             "--no-init" => o.term_init = false,
             "--local" => o.localhost = true,
             "--bind-server" => o.bind_ip = Some(take(&mut i)?),
+            "--experimental-remote-ip" => {
+                let v = take(&mut i)?.to_lowercase();
+                if !["local", "remote", "proxy"].contains(&v.as_str()) {
+                    return Err(OptError::BadRemoteIp(v));
+                }
+                o.remote_ip = v;
+            }
+            "--fake-proxy" => o.fake_proxy = true,
+            "--no-fake-proxy" => o.fake_proxy = false,
             "--help" => o.help = true,
             "--version" => o.version = true,
             // Unrecognised options are passed through to ssh, as the Perl does for
@@ -256,6 +276,9 @@ Usage: mosh [options] [--] [user@]host [command...]
         --no-ssh-pty         do not allocate a pty on the ssh connection
         --no-init            do not send terminal initialization string
         --local              run mosh-server locally without using ssh
+        --experimental-remote-ip=(local|remote|proxy)  select the method for
+                             discovering the remote IP address to use for mosh
+                             (default: \"proxy\")
         --help               this message
         --version            version and copyright information";
 
@@ -324,6 +347,35 @@ mod tests {
         assert!(!parse(&argv(&["mosh", "--no-init", "h"])).unwrap().term_init);
         assert!(parse(&argv(&["mosh", "--init", "h"])).unwrap().term_init);
         assert!(!parse(&argv(&["mosh", "--no-ssh-pty", "h"])).unwrap().ssh_pty);
+    }
+
+    #[test]
+    fn the_remote_ip_method_defaults_to_proxy_and_takes_the_three_spellings() {
+        assert_eq!(parse(&argv(&["mosh", "h"])).unwrap().remote_ip, "proxy");
+        for method in ["local", "remote", "proxy"] {
+            let o = parse(&argv(&["mosh", &format!("--experimental-remote-ip={method}"), "h"]));
+            assert_eq!(o.unwrap().remote_ip, method);
+        }
+        assert_eq!(
+            parse(&argv(&["mosh", "--experimental-remote-ip=sideways", "h"])),
+            Err(OptError::BadRemoteIp("sideways".into())),
+            "an unknown method should be rejected rather than passed to ssh"
+        );
+    }
+
+    #[test]
+    fn the_fake_proxy_takes_its_host_and_port_after_the_separator() {
+        let o = parse(&argv(&[
+            "mosh",
+            "--family=inet",
+            "--fake-proxy",
+            "--",
+            "10.0.0.1",
+            "22",
+        ]))
+        .unwrap();
+        assert!(o.fake_proxy);
+        assert_eq!(o.command, argv(&["10.0.0.1", "22"]));
     }
 
     #[test]
