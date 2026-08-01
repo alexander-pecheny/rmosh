@@ -203,7 +203,7 @@ impl ConnectionState {
 /// A connection over UDP.
 pub struct Connection {
     /// Newest last; older sockets are kept briefly so replies to them still arrive.
-    socks: Vec<(UdpSocket, u64)>,
+    socks: Vec<UdpSocket>,
     remote_addr: Option<SocketAddr>,
     server: bool,
     mtu: usize,
@@ -249,7 +249,7 @@ impl Connection {
         let session = Session::new(&key);
 
         Ok(Connection {
-            socks: vec![(sock, now)],
+            socks: vec![sock],
             remote_addr: None,
             server: true,
             mtu: DEFAULT_SEND_MTU,
@@ -285,7 +285,7 @@ impl Connection {
         };
 
         Ok(Connection {
-            socks: vec![(sock, now)],
+            socks: vec![sock],
             remote_addr: Some(remote),
             server: false,
             mtu,
@@ -329,12 +329,12 @@ impl Connection {
     }
 
     fn current_sock(&self) -> &UdpSocket {
-        &self.socks.last().expect("at least one socket").0
+        self.socks.last().expect("at least one socket")
     }
 
     /// Every socket we might receive on, for the caller's poll set.
     pub fn sockets(&self) -> Vec<&UdpSocket> {
-        self.socks.iter().map(|(s, _)| s).collect()
+        self.socks.iter().collect()
     }
 
     pub fn send(&mut self, payload: Vec<u8>, now: u64) -> Result<(), CryptoError> {
@@ -382,24 +382,21 @@ impl Connection {
         let bind_addr = if remote.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
         let sock = UdpSocket::bind(bind_addr)?;
         sock.set_nonblocking(true)?;
-        self.socks.push((sock, now));
+        self.socks.push(sock);
         self.last_port_choice = now;
         self.prune_sockets(now);
         Ok(())
     }
 
     fn prune_sockets(&mut self, now: u64) {
-        // Drop sockets that have been superseded long enough that no reply can still be
-        // in flight to them.
-        self.socks
-            .retain(|(_, opened)| now.saturating_sub(*opened) <= MAX_OLD_SOCKET_AGE);
+        // Once the newest socket has been working long enough, no reply can still be in
+        // flight to the ones it superseded, so keep it alone.
+        if self.socks.len() > 1 && now.saturating_sub(self.last_port_choice) > MAX_OLD_SOCKET_AGE {
+            self.socks.drain(..self.socks.len() - 1);
+        }
         // Never keep more than a bounded number, however recent.
         while self.socks.len() > MAX_PORTS_OPEN {
             self.socks.remove(0);
-        }
-        if self.socks.is_empty() {
-            // Losing every socket would end the session; keep the newest.
-            unreachable!("prune_sockets must leave at least one socket");
         }
     }
 
@@ -408,7 +405,7 @@ impl Connection {
         let mut buf = [0u8; mosh_crypto::RECEIVE_MTU];
 
         for i in 0..self.socks.len() {
-            let (n, from) = match self.socks[i].0.recv_from(&mut buf) {
+            let (n, from) = match self.socks[i].recv_from(&mut buf) {
                 Ok(v) => v,
                 Err(_) => continue, // would block, or nothing here
             };
@@ -627,5 +624,44 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         assert_eq!(got.as_deref(), Some(&b"hello client"[..]));
+    }
+
+    #[test]
+    fn a_session_outlives_the_age_at_which_old_sockets_are_dropped() {
+        let mut server = Connection::new_server(Some("127.0.0.1"), 0, 0, 0)
+            .or_else(|_| Connection::new_server(Some("127.0.0.1"), 61234, 61999, 0))
+            .expect("bind server");
+        let port = server.port().expect("port");
+        let mut client =
+            Connection::new_client(&server.key(), "127.0.0.1", port, 0).expect("client");
+
+        // A session that has never had to hop still has its original socket, however
+        // old. Pruning it would leave nothing to receive on.
+        let later = MAX_OLD_SOCKET_AGE + 1000;
+        client.send(b"still here".to_vec(), later).unwrap();
+        let mut got = None;
+        for _ in 0..100 {
+            if let Some(Ok(r)) = server.recv(later) {
+                got = Some(r.into_payload());
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(got.as_deref(), Some(&b"still here"[..]));
+        assert_eq!(server.sockets().len(), 1);
+    }
+
+    #[test]
+    fn a_superseded_socket_is_dropped_once_the_newest_has_proved_itself() {
+        let key = Base64Key::random().printable();
+        let mut client = Connection::new_client(&key, "127.0.0.1", 60001, 0).expect("client");
+        client.hop_port(1000).expect("hop");
+        assert_eq!(client.sockets().len(), 2);
+
+        client.prune_sockets(1000 + MAX_OLD_SOCKET_AGE);
+        assert_eq!(client.sockets().len(), 2, "dropped while a reply could arrive");
+
+        client.prune_sockets(1000 + MAX_OLD_SOCKET_AGE + 1);
+        assert_eq!(client.sockets().len(), 1);
     }
 }
