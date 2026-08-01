@@ -1,5 +1,9 @@
 > [!NOTE]
-> This is a personal fork of [mobile-shell/mosh](https://github.com/mobile-shell/mosh). It adds two patches: forwarding dynamic color queries and OSC 52 clipboard queries to the host terminal.
+> This is a hand port of [mobile-shell/mosh](https://github.com/mobile-shell/mosh) to Rust, in `crates/`: the terminal emulator, the state synchronisation, the network layer, `mosh-server`, `mosh-client`, and the launcher that replaces the Perl wrapper. See [ADR 0001](docs/adr/0001-hand-port-rather-than-transpile.md) for why it is a hand port.
+>
+> It carries the two patches this fork started as: forwarding dynamic color queries and OSC 52 clipboard queries to the host terminal.
+>
+> The C++ tree is still here and still builds. Either endpoint of a session can be either implementation, which is how the port is checked: `MOSH_CLIENT_OVERRIDE` and `MOSH_SERVER_OVERRIDE` point the existing test suite at the Rust binaries, so a Rust client can be run against a C++ server and the frames compared.
 
 [![ci](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml/badge.svg)](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml)
 
@@ -142,10 +146,10 @@ saving almost 200 kilobytes on disk). While Mosh is not especially CPU
 intensive and mostly sits idle when the user is not typing, we think
 the results suggest that `-O2` (the default) is preferable.
 
-Our Debian and Fedora packaging presents Mosh as a single package.
-Mosh has a Perl dependency that is only required for client use.  For
-some platforms, it may make sense to have separate mosh-server and
-mosh-client packages to allow mosh-server usage without Perl.
+Our Debian and Fedora packaging presents Mosh as a single package. The C++ build
+has a Perl dependency that is only required for client use, so for some platforms
+it may make sense to have separate mosh-server and mosh-client packages to allow
+mosh-server usage without Perl. The Rust launcher has no such dependency.
 
 Notes for developers
 --------------------
@@ -175,13 +179,29 @@ MacOS:
 $ brew install protobuf automake
 ```
 
-Once you have forked the repository, run the following to build and test Mosh:
+The Rust port needs a Rust toolchain and `protoc`, both covered by the dependencies
+above on Linux and by `brew install protobuf` on MacOS:
+
+```
+$ cargo build --release
+$ cargo test
+```
+
+The C++ tree builds as it always did:
 
 ```
 $ ./autogen.sh
 $ ./configure
 $ make
 $ make check
+```
+
+To run the shell tests against the Rust binaries instead, point them at the built
+executables:
+
+```
+$ MOSH_CLIENT_OVERRIDE=$PWD/target/release/mosh-client \
+  MOSH_SERVER_OVERRIDE=$PWD/target/release/mosh-server make check
 ```
 
 Mosh supports producing code coverage reports by tests, but this feature is
