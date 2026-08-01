@@ -1,3 +1,6 @@
+> [!NOTE]
+> This is a personal fork of [mobile-shell/mosh](https://github.com/mobile-shell/mosh). It adds two patches: forwarding dynamic color queries and OSC 52 clipboard queries to the host terminal.
+
 [![ci](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml/badge.svg)](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml)
 
 Mosh: the mobile shell
