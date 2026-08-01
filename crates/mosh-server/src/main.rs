@@ -134,7 +134,12 @@ fn serve(
     verbose: u32,
 ) -> std::io::Result<()> {
     let master = master_fd.as_raw_fd();
+    // A ^S arriving between the poll and the read can otherwise leave read() blocking
+    // even though poll reported data, wedging everything attached to the pty.
+    let _ = pty::set_nonblocking(master);
     let mut host = std::fs::File::from(master_fd);
+    // Output the pty could not accept yet, retried on later passes rather than blocking.
+    let mut pending_to_host: Vec<u8> = Vec::new();
     let mut last_remote_num = transport.remote_state_num();
     let mut buf = [0u8; 16384];
     let start = pty::now_ms();
@@ -220,13 +225,31 @@ fn serve(
                     let reply = transport.sender.current_state_mut().act(&buf[..n]);
                     terminal_to_host.extend_from_slice(reply.as_bytes());
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(ref e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                // The pty slave closing surfaces as EIO, which means the same as EOF.
                 Err(_) => child_exit = Some(0),
             }
         }
 
-        if !terminal_to_host.is_empty() && child_exit.is_none() {
-            let _ = host.write_all(&terminal_to_host);
+        // Write what the pty will take. Blocking here would deadlock: the child can be
+        // stopped by a ^S while still owing us output, so we must stay able to read.
+        pending_to_host.extend_from_slice(&terminal_to_host);
+        if !pending_to_host.is_empty() && child_exit.is_none() {
+            match host.write(&pending_to_host) {
+                Ok(n) => {
+                    pending_to_host.drain(..n);
+                }
+                Err(ref e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                    ) => {}
+                Err(_) => child_exit = Some(0),
+            }
         }
 
         // Late echo acknowledgement, so the client can retire its predictions. Frozen

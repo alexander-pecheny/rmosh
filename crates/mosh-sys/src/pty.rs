@@ -162,6 +162,25 @@ pub fn detach() -> std::io::Result<bool> {
     }
 }
 
+/// Put a descriptor into non-blocking mode.
+///
+/// The pty master needs this: a ^S written between the poll and the read can leave
+/// read() blocking even though poll said data was ready, which wedges everything
+/// attached to the pty. See src/tests/pty-deadlock.test.
+pub fn set_nonblocking(fd: RawFd) -> std::io::Result<()> {
+    // SAFETY: both calls only read and write the descriptor's own flags.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 /// Point the standard streams at /dev/null.
 ///
 /// A detached server must let go of the pipes it inherited, or whoever started it keeps
