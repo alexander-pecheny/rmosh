@@ -203,8 +203,8 @@ ln -fs "${tmux_socket}" "${test_dir}/tmux-socket"
 for run in $server_tests; do
     log "Running server test %s.\n" "$run"
     # These three variables are for the benefit of the mosh-client and mosh-server wrappers.
-    export MOSH_CLIENT="$PWD/../frontend/mosh-client"
-    export MOSH_SERVER="$PWD/../frontend/mosh-server"
+    export MOSH_CLIENT="${MOSH_CLIENT_OVERRIDE:-$PWD/../frontend/mosh-client}"
+    export MOSH_SERVER="${MOSH_SERVER_OVERRIDE:-$PWD/../frontend/mosh-server}"
     export MOSH_E2E_TEST="$PWD/${test_dir}/${run}"
     # XXX need to quote special chars in server pathname here somehow
     sut="../../scripts/mosh --client=${srcdir}/mosh-client --server=${srcdir}/mosh-server --local --bind-server=127.0.0.1 ${mosh_args} 127.0.0.1"

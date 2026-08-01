@@ -11,8 +11,8 @@ out=$(
     TERM=xterm \
         ./inpty \
         ../../scripts/mosh \
-        --client="../frontend/mosh-client" \
-        --server="$PWD/../frontend/mosh-server" \
+        --client="${MOSH_CLIENT_OVERRIDE:-../frontend/mosh-client}" \
+        --server="${MOSH_SERVER_OVERRIDE:-$PWD/../frontend/mosh-server}" \
         --local --bind-server=127.0.0.1 127.0.0.1 \
         -- printf 'he%s\n' llo)
 case "$out" in
