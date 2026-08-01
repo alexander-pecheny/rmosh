@@ -118,6 +118,40 @@ pub fn set_window_size(fd: RawFd, rows: u16, cols: u16) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Put a terminal into raw mode, returning its previous settings.
+///
+/// The client must see every keystroke unprocessed, since it is the remote application
+/// that decides what they mean.
+pub fn set_raw(fd: RawFd) -> std::io::Result<libc::termios> {
+    // SAFETY: an all-zero termios is overwritten by tcgetattr before it is read.
+    let mut saved: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: fd is owned by the caller; saved is a live, correctly-typed struct.
+    if unsafe { libc::tcgetattr(fd, &mut saved) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut raw = saved;
+    // SAFETY: cfmakeraw only rewrites the flags of the struct we pass it.
+    unsafe {
+        libc::cfmakeraw(&mut raw);
+    }
+    // The locale is UTF-8, so tell the line discipline as much; without it, erase
+    // handling miscounts multibyte characters.
+    raw.c_iflag |= libc::IUTF8;
+    // SAFETY: raw is a live, fully-initialised termios.
+    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(saved)
+}
+
+/// Restore terminal settings saved by [`set_raw`].
+pub fn restore_termios(fd: RawFd, saved: &libc::termios) {
+    // SAFETY: saved is a live, fully-initialised termios owned by the caller.
+    unsafe {
+        libc::tcsetattr(fd, libc::TCSANOW, saved);
+    }
+}
+
 /// Is this descriptor a terminal?
 pub fn isatty(fd: RawFd) -> bool {
     // SAFETY: isatty only inspects the descriptor and never writes through a pointer.

@@ -10,6 +10,10 @@ license.workspace = true
 name = "mosh_client"
 path = "src/lib.rs"
 
+[[bin]]
+name = "mosh-client"
+path = "src/main.rs"
+
 [dependencies]
 mosh-network = { path = "../mosh-network" }
 mosh-state = { path = "../mosh-state" }
