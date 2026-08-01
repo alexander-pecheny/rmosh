@@ -63,13 +63,15 @@ pub fn forkpty(rows: u16, cols: u16) -> std::io::Result<ForkPty> {
 
 /// Replace this process with `program`. Only returns on failure.
 ///
+/// `args` is the whole argv, argv[0] included: a login shell is spelled with the
+/// program `/bin/zsh` and an argv[0] of `-zsh`, so the two cannot be conflated.
+///
 /// Intended for use immediately after [`forkpty`] returns [`ForkPty::Child`].
 pub fn exec(program: &str, args: &[String], env: &[(String, String)]) -> std::io::Error {
     let Ok(prog) = CString::new(program) else {
         return std::io::Error::new(std::io::ErrorKind::InvalidInput, "program name has a NUL");
     };
-    let mut argv: Vec<CString> = Vec::with_capacity(args.len() + 1);
-    argv.push(prog.clone());
+    let mut argv: Vec<CString> = Vec::with_capacity(args.len());
     for a in args {
         match CString::new(a.as_str()) {
             Ok(c) => argv.push(c),

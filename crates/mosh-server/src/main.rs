@@ -340,7 +340,7 @@ fn serve(
 /// What to run in the pty: the requested command, or the user's shell.
 fn child_command(args: &args::Args) -> (String, Vec<String>) {
     if !args.command.is_empty() {
-        return (args.command[0].clone(), args.command[1..].to_vec());
+        return (args.command[0].clone(), args.command.clone());
     }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     // A leading '-' asks the shell to behave as a login shell.
