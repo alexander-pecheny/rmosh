@@ -29,6 +29,13 @@ fn main() {
         return;
     }
 
+    // The launcher runs us with -c to learn how many colours the terminal has, before
+    // any session exists. It must answer and exit without needing a key.
+    if argv.iter().any(|a| a == "-c") {
+        print_colorcount();
+        return;
+    }
+
     // The key arrives in the environment so it never appears in the process table, and
     // is removed immediately so the child of any later fork cannot see it.
     let Some(key) = mosh_sys::take_env("MOSH_KEY") else {
@@ -65,6 +72,19 @@ fn main() {
         eprintln!("mosh-client: {e}");
         std::process::exit(1);
     }
+}
+
+/// Report the terminal's colour count for the launcher, which passes it to the server.
+fn print_colorcount() {
+    if mosh_sys::terminfo::setup().is_err() {
+        println!("-1");
+        return;
+    }
+    let color_val = mosh_sys::terminfo::number("colors");
+    if color_val == -2 {
+        eprintln!("Invalid terminfo numeric capability: colors");
+    }
+    println!("{color_val}");
 }
 
 fn run(
