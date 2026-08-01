@@ -6,5 +6,6 @@
 #![forbid(unsafe_code)]
 
 pub mod compressor;
+pub mod connection;
 pub mod fragment;
 pub mod packet;
