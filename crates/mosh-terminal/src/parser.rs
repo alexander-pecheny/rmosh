@@ -412,6 +412,7 @@ const BUF_SIZE: usize = 8;
 ///
 /// Follows Unicode 6.0 section 3.9 on replacement characters, which is why a bad
 /// sequence is retried from its last byte rather than discarded whole.
+#[derive(Debug, Clone)]
 pub struct Utf8Parser {
     parser: Parser,
     buf: Vec<u8>,

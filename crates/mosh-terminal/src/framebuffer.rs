@@ -1168,13 +1168,13 @@ impl Framebuffer {
 impl PartialEq for Framebuffer {
     fn eq(&self, other: &Self) -> bool {
         self.rows.len() == other.rows.len()
-            // Shared rows are equal without comparing any cells, which is what makes
-            // comparing two snapshots of a mostly-unchanged screen cheap.
-            && self
-                .rows
-                .iter()
-                .zip(&other.rows)
-                .all(|(a, b)| Rc::ptr_eq(a, b) || a == b)
+            // Rows are compared by identity, not by content. The C++ compares a
+            // vector<shared_ptr<Row>>, which compares the pointers, and that is the
+            // intended meaning: this asks "is this the same row I already had", which is
+            // what state sync needs. Two rows with equal contents but separate
+            // allocations are deliberately unequal -- the cost is a redundant diff,
+            // whereas a false positive would lose an update.
+            && self.rows.iter().zip(&other.rows).all(|(a, b)| Rc::ptr_eq(a, b))
             && self.window_title == other.window_title
             && self.clipboard == other.clipboard
             && self.clipboard_seq == other.clipboard_seq
