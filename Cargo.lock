@@ -304,6 +304,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosh-server"
+version = "1.4.0"
+dependencies = [
+ "mosh-network",
+ "mosh-state",
+ "mosh-sys",
+ "mosh-terminal",
+]
+
+[[package]]
 name = "mosh-state"
 version = "1.4.0"
 dependencies = [

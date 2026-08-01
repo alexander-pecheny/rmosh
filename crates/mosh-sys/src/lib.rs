@@ -6,6 +6,7 @@
 //! makes it sound. See ADR 0003.
 
 pub mod locale;
+pub mod pty;
 pub mod terminfo;
 pub mod utmp;
 

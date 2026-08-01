@@ -1,0 +1,17 @@
+[package]
+name = "mosh-server"
+description = "The mosh server: owns the pty and the authoritative screen."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mosh-server"
+path = "src/main.rs"
+
+[dependencies]
+mosh-network = { path = "../mosh-network" }
+mosh-state = { path = "../mosh-state" }
+mosh-sys = { path = "../mosh-sys" }
+mosh-terminal = { path = "../mosh-terminal" }
