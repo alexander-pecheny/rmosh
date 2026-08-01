@@ -590,16 +590,16 @@ static void CSI_DECSTR( Framebuffer* fb, Dispatcher* dispatch __attribute( ( unu
 
 static Function func_CSI_DECSTR( CSI, "!p", CSI_DECSTR );
 
-static bool Parse_OSC_8( const std::vector<wchar_t>& osc8_vector, std::string& osc8_str )
+static bool Parse_printable_OSC( const std::vector<wchar_t>& osc_vector, std::string& osc_str )
 {
-  osc8_str.reserve( osc8_vector.size() );
-  for ( wchar_t wide_char : osc8_vector ) {
+  osc_str.reserve( osc_vector.size() );
+  for ( wchar_t wide_char : osc_vector ) {
     // Valid char range is 32-126, per
     // https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda#encodings
     if ( wide_char < 32 || wide_char > 126 ) {
       return false;
     }
-    osc8_str.append( 1, static_cast<char>( wide_char ) );
+    osc_str.append( 1, static_cast<char>( wide_char ) );
   }
   return true;
 }
@@ -623,14 +623,47 @@ static void OSC_8( const std::string& OSC_string, Framebuffer* fb )
   fb->ds.set_hyperlink( Hyperlink( OSC_string.substr( 2, second_semicolon - 2 ), std::move( url ) ) );
 }
 
+/* OSC 4;Ps;? asks for a palette color and OSC 10 through 19;? for a dynamic color such as
+   the default background. Mosh has no colors of its own to report, so the query is passed
+   to the client's terminal and its reply reaches the application as ordinary input. */
+static bool Parse_color_query( const Framebuffer::title_type& osc_vector, std::string& query )
+{
+  if ( osc_vector.empty() || osc_vector.back() != L'?' ) {
+    return false;
+  }
+
+  std::string body;
+  if ( !Parse_printable_OSC( osc_vector, body ) ) {
+    return false;
+  }
+
+  const size_t separator = body.find_first_of( ';' );
+  if ( separator == std::string::npos ) {
+    return false;
+  }
+
+  const std::string command = body.substr( 0, separator );
+  const bool dynamic_color = command.size() == 2 && command[0] == '1' && command[1] >= '0' && command[1] <= '9';
+  if ( command != "4" && !dynamic_color ) {
+    return false;
+  }
+
+  query = "\033]" + body + "\033\\";
+  return true;
+}
+
 /* xterm uses an Operating System Command to set the window title */
 void Dispatcher::OSC_dispatch( const Parser::OSC_End* act __attribute( ( unused ) ), Framebuffer* fb )
 {
+  std::string color_query;
   /* handle osc clipboard sequence 52;Pc;Pd (Pd is base64 data to copy, or "?" to query) */
   if ( OSC_string.size() >= 4 && OSC_string[0] == L'5' && OSC_string[1] == L'2' && OSC_string[2] == L';'
        && std::find( OSC_string.begin() + 3, OSC_string.end(), L';' ) != OSC_string.end() ) {
     Terminal::Framebuffer::title_type clipboard( OSC_string.begin() + 3, OSC_string.end() );
     fb->set_clipboard( clipboard );
+    /* forward a color query to the client's terminal */
+  } else if ( Parse_color_query( OSC_string, color_query ) ) {
+    fb->add_color_query( color_query );
     /* handle osc terminal title sequence */
   } else if ( OSC_string.size() >= 1 ) {
     long cmd_num = -1;
@@ -650,7 +683,7 @@ void Dispatcher::OSC_dispatch( const Parser::OSC_End* act __attribute( ( unused 
     if ( cmd_num == 8 ) {
       // Handle OSC8 hyperlinks separately
       std::string osc_8_str;
-      if ( !Parse_OSC_8( OSC_string, osc_8_str ) ) {
+      if ( !Parse_printable_OSC( OSC_string, osc_8_str ) ) {
         //
         return;
       }

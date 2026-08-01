@@ -43,6 +43,9 @@ using namespace HostBuffers;
 
 string Complete::act( const string& str )
 {
+  /* only the queries raised by this batch of output are still waiting for a reply */
+  terminal.clear_color_queries();
+
   for ( unsigned int i = 0; i < str.size(); i++ ) {
     /* parse octet into up to three actions */
     parser.input( str[i], actions );

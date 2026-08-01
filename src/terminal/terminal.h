@@ -81,6 +81,8 @@ public:
 
   const Framebuffer& get_fb( void ) const { return fb; }
 
+  void clear_color_queries( void ) { fb.clear_color_queries(); }
+
   bool operator==( Emulator const& x ) const;
 };
 }

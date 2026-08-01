@@ -113,6 +113,12 @@ std::string Display::new_frame( bool initialized, const Framebuffer& last, const
     frame.append( '\007' );
   }
 
+  /* has the application asked the terminal to report a color? (gated on initialized
+     for the same reason as the clipboard) */
+  if ( initialized && f.get_color_query_seq() != frame.last_frame.get_color_query_seq() ) {
+    frame.append_string( f.get_color_queries() );
+  }
+
   /* has reverse video state changed? */
   if ( ( !initialized ) || ( f.ds.reverse_video != frame.last_frame.ds.reverse_video ) ) {
     /* set reverse video */

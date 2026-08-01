@@ -73,8 +73,8 @@ DrawState::DrawState( int s_width, int s_height )
 }
 
 Framebuffer::Framebuffer( int s_width, int s_height )
-  : rows(), icon_name(), window_title(), clipboard(), clipboard_seq( 0 ), bell_count( 0 ),
-    title_initialized( false ), ds( s_width, s_height )
+  : rows(), icon_name(), window_title(), clipboard(), clipboard_seq( 0 ), color_queries(), color_query_seq( 0 ),
+    bell_count( 0 ), title_initialized( false ), ds( s_width, s_height )
 {
   assert( s_height > 0 );
   assert( s_width > 0 );
@@ -85,7 +85,8 @@ Framebuffer::Framebuffer( int s_width, int s_height )
 
 Framebuffer::Framebuffer( const Framebuffer& other )
   : rows( other.rows ), icon_name( other.icon_name ), window_title( other.window_title ),
-    clipboard( other.clipboard ), clipboard_seq( other.clipboard_seq ), bell_count( other.bell_count ),
+    clipboard( other.clipboard ), clipboard_seq( other.clipboard_seq ), color_queries( other.color_queries ),
+    color_query_seq( other.color_query_seq ), bell_count( other.bell_count ),
     title_initialized( other.title_initialized ), ds( other.ds )
 {}
 
@@ -97,6 +98,8 @@ Framebuffer& Framebuffer::operator=( const Framebuffer& other )
     window_title = other.window_title;
     clipboard = other.clipboard;
     clipboard_seq = other.clipboard_seq;
+    color_queries = other.color_queries;
+    color_query_seq = other.color_query_seq;
     bell_count = other.bell_count;
     title_initialized = other.title_initialized;
     ds = other.ds;
@@ -389,6 +392,7 @@ void Framebuffer::reset( void )
   rows = rows_type( height, newrow() );
   window_title.clear();
   clipboard.clear();
+  color_queries.clear();
   /* do not reset bell_count */
 }
 

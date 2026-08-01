@@ -419,6 +419,8 @@ private:
   title_type window_title;
   title_type clipboard;
   unsigned int clipboard_seq;
+  std::string color_queries;
+  unsigned int color_query_seq;
   unsigned int bell_count;
   bool title_initialized; /* true if the window title has been set via an OSC */
 
@@ -509,6 +511,20 @@ public:
   const title_type& get_clipboard( void ) const { return clipboard; }
   unsigned int get_clipboard_seq( void ) const { return clipboard_seq; }
 
+  /* Color queries are events rather than state: they accumulate for one batch of
+     terminal output and are forwarded to the client's terminal once. */
+  static const size_t MAXIMUM_COLOR_QUERIES = 4096;
+  void add_color_query( const std::string& query )
+  {
+    if ( color_queries.size() + query.size() <= MAXIMUM_COLOR_QUERIES ) {
+      color_queries.append( query );
+    }
+    color_query_seq++;
+  }
+  void clear_color_queries( void ) { color_queries.clear(); }
+  const std::string& get_color_queries( void ) const { return color_queries; }
+  unsigned int get_color_query_seq( void ) const { return color_query_seq; }
+
   void prefix_window_title( const title_type& s );
 
   void resize( int s_width, int s_height );
@@ -522,7 +538,8 @@ public:
   bool operator==( const Framebuffer& x ) const
   {
     return ( rows == x.rows ) && ( window_title == x.window_title ) && ( clipboard == x.clipboard )
-           && ( clipboard_seq == x.clipboard_seq ) && ( bell_count == x.bell_count ) && ( ds == x.ds );
+           && ( clipboard_seq == x.clipboard_seq ) && ( color_queries == x.color_queries )
+           && ( color_query_seq == x.color_query_seq ) && ( bell_count == x.bell_count ) && ( ds == x.ds );
   }
 };
 }
