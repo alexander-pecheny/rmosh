@@ -2,5 +2,6 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dispatcher;
 pub mod framebuffer;
 pub mod parser;
