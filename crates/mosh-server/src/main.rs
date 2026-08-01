@@ -14,6 +14,24 @@ use mosh_network::transport::Transport;
 use mosh_state::{Complete, UserEvent, UserStream};
 use mosh_sys::pty;
 
+/// An idle-network shutdown, in milliseconds, from MOSH_SERVER_NETWORK_TMOUT.
+///
+/// Seconds in the environment, since that is what the variable has always meant.
+fn network_timeout_from_env() -> Option<u64> {
+    let raw = std::env::var("MOSH_SERVER_NETWORK_TMOUT").ok()?;
+    match raw.trim().parse::<i64>() {
+        Ok(v) if v >= 0 => Some(v as u64 * 1000),
+        Ok(_) => {
+            eprintln!("MOSH_SERVER_NETWORK_TMOUT is negative, ignoring");
+            None
+        }
+        Err(_) => {
+            eprintln!("MOSH_SERVER_NETWORK_TMOUT not a valid integer, ignoring");
+            None
+        }
+    }
+}
+
 /// Give up if no client has ever connected within this long.
 const TIMEOUT_IF_NO_CLIENT: u64 = 60000;
 /// Give up if a client connected and then vanished for this long.
@@ -148,6 +166,7 @@ fn serve(
     // background process the child started still holds the slave, so this alone must
     // not end the session -- we drain first.
     let mut child_reaped = false;
+    let network_timeout = network_timeout_from_env();
 
     loop {
         let now = pty::now_ms();
@@ -295,6 +314,15 @@ fn serve(
 
         // Give up if nobody ever arrives, or if a client vanishes for a very long time.
         let since_remote = now.saturating_sub(transport.get_remote_state_timestamp());
+
+        // An operator-set idle timeout, which exists so an abandoned session does not
+        // hold a pty open indefinitely.
+        if let Some(limit) = network_timeout {
+            if since_remote >= limit {
+                eprintln!("Network idle for {} seconds.", since_remote / 1000);
+                break;
+            }
+        }
         if transport.remote_state_num() == 0 && now.saturating_sub(start) >= TIMEOUT_IF_NO_CLIENT {
             eprintln!("mosh-server: No client arrived; exiting.");
             break;
