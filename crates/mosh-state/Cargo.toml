@@ -7,5 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+mosh-network = { path = "../mosh-network" }
 mosh-protobufs = { path = "../mosh-protobufs" }
 mosh-terminal = { path = "../mosh-terminal" }

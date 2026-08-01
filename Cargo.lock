@@ -290,6 +290,7 @@ name = "mosh-network"
 version = "1.4.0"
 dependencies = [
  "flate2",
+ "getrandom 0.3.4",
  "mosh-crypto",
  "mosh-protobufs",
 ]
@@ -306,6 +307,7 @@ dependencies = [
 name = "mosh-state"
 version = "1.4.0"
 dependencies = [
+ "mosh-network",
  "mosh-protobufs",
  "mosh-terminal",
 ]
