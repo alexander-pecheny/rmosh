@@ -144,6 +144,10 @@ fn serve(
     let mut buf = [0u8; 16384];
     let start = pty::now_ms();
     let mut child_exit: Option<i32> = None;
+    // Set once the child is reaped. The pty can stay open past that, because a
+    // background process the child started still holds the slave, so this alone must
+    // not end the session -- we drain first.
+    let mut child_reaped = false;
 
     loop {
         let now = pty::now_ms();
@@ -215,6 +219,8 @@ fn serve(
             }
         }
 
+        // Whether the pty gave us anything this time round.
+        let mut drained_this_pass = false;
         if child_exit.is_none()
             && !transport.sender.shutdown_in_progress()
             && ready.iter().any(|&i| i >= network_count)
@@ -222,6 +228,7 @@ fn serve(
             match host.read(&mut buf) {
                 Ok(0) => child_exit = Some(0),
                 Ok(n) => {
+                    drained_this_pass = true;
                     let reply = transport.sender.current_state_mut().act(&buf[..n]);
                     terminal_to_host.extend_from_slice(reply.as_bytes());
                 }
@@ -261,11 +268,19 @@ fn serve(
 
         transport.tick(now);
 
-        // Reap the child so it does not linger as a zombie, but do not let its exit
-        // end the session: the pty may still hold output the child wrote just before
-        // exiting. EOF on the pty is the authority for "there is no more output",
-        // which is what the C++ uses.
-        pty::try_wait(child);
+        // Reap the child so it does not linger as a zombie. Its exit alone does not end
+        // the session: output it wrote just before exiting may still be in the pty.
+        if pty::try_wait(child).is_some() {
+            child_reaped = true;
+        }
+
+        // Once the child is gone and the pty has nothing left for us, the session is
+        // over. Waiting for EOF alone is not enough -- a background process the child
+        // started can hold the slave open indefinitely -- and acting on the exit alone
+        // is not enough either, because it would discard the child's last output.
+        if child_reaped && child_exit.is_none() && !drained_this_pass {
+            child_exit = Some(0);
+        }
 
         if child_exit.is_some() {
             if !transport.sender.shutdown_in_progress() {
