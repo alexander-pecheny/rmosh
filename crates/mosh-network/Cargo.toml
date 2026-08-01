@@ -1,0 +1,11 @@
+[package]
+name = "mosh-network"
+description = "Datagram framing: compression, fragmentation and reassembly."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mosh-protobufs = { path = "../mosh-protobufs" }
+flate2 = "1"

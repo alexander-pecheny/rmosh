@@ -6,6 +6,7 @@ members = [
     "crates/mosh-protobufs",
     "crates/mosh-terminal",
     "crates/mosh-state",
+    "crates/mosh-network",
 ]
 
 [workspace.package]
