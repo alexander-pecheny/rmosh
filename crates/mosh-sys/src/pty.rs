@@ -44,7 +44,7 @@ pub fn forkpty(rows: u16, cols: u16) -> std::io::Result<ForkPty> {
         libc::forkpty(
             &mut master,
             std::ptr::null_mut(),
-            std::ptr::null(),
+            std::ptr::null_mut::<libc::termios>(),
             &winsize as *const libc::winsize as *mut libc::winsize,
         )
     };

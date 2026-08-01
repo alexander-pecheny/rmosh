@@ -10,19 +10,23 @@ use std::ffi::{CStr, CString};
 // The libc crate does not re-export the locale-dependent character functions, so we
 // declare them here. Signatures follow POSIX.
 mod sys {
+    // The libc crate exports mbstate_t only on some platforms, and its size differs (8
+    // bytes on glibc, 128 on Darwin), so we reserve the larger. Zero is the initial
+    // conversion state everywhere.
+    #[repr(C, align(8))]
+    #[derive(Clone, Copy)]
+    pub struct MbState(pub [u8; 128]);
+
     extern "C" {
         pub fn wcwidth(c: libc::wchar_t) -> libc::c_int;
         pub fn mbrtowc(
             pwc: *mut libc::wchar_t,
             s: *const libc::c_char,
             n: libc::size_t,
-            ps: *mut libc::mbstate_t,
+            ps: *mut MbState,
         ) -> libc::size_t;
-        pub fn wcrtomb(
-            s: *mut libc::c_char,
-            wc: libc::wchar_t,
-            ps: *mut libc::mbstate_t,
-        ) -> libc::size_t;
+        pub fn wcrtomb(s: *mut libc::c_char, wc: libc::wchar_t, ps: *mut MbState)
+            -> libc::size_t;
     }
 }
 
@@ -100,7 +104,7 @@ pub enum Decoded {
 /// Wraps `mbstate_t` so that sequences split across reads decode correctly, which is
 /// what the parser relies on when a character straddles two reads from the pty.
 pub struct MbDecoder {
-    state: libc::mbstate_t,
+    state: sys::MbState,
 }
 
 impl Default for MbDecoder {
@@ -162,7 +166,7 @@ pub fn append_wchar(out: &mut Vec<u8>, c: char) {
         return;
     }
     let mut buf = [0u8; MB_LEN_MAX];
-    let mut state: libc::mbstate_t =
+    let mut state: sys::MbState =
         // SAFETY: an all-zero mbstate_t is the documented initial conversion state.
         unsafe { std::mem::zeroed() };
     // SAFETY: buf is MB_LEN_MAX bytes, the maximum wcrtomb can write for one character.
