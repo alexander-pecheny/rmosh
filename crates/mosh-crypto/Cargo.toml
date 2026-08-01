@@ -1,0 +1,13 @@
+[package]
+name = "mosh-crypto"
+description = "Session keys, nonces and AES-128-OCB3 message protection."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# ocb3 0.1 is built on cipher 0.4, which pins aes to the 0.8 line.
+aes = "0.8"
+ocb3 = "0.1"
+getrandom = "0.3"

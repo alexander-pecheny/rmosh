@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mosh-sys",
+    "crates/mosh-crypto",
+    "crates/mosh-protobufs",
+]
+
+[workspace.package]
+version = "1.4.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/mobile-shell/mosh"
+
+[workspace.dependencies]
+libc = "0.2"

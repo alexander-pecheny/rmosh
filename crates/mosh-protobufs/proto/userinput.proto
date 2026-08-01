@@ -1,0 +1,23 @@
+syntax = "proto2";
+
+package ClientBuffers;
+
+// keystroke/resize are proto2 extensions upstream; inlined here with their original
+// field numbers, which leaves the encoding unchanged. See hostinput.proto.
+message UserMessage {
+  repeated Instruction instruction = 1;
+}
+
+message Instruction {
+  optional Keystroke keystroke = 2;
+  optional ResizeMessage resize = 3;
+}
+
+message Keystroke {
+  optional bytes keys = 4;
+}
+
+message ResizeMessage {
+  optional int32 width = 5;
+  optional int32 height = 6;
+}

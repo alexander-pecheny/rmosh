@@ -1,0 +1,17 @@
+[package]
+name = "mosh-sys"
+description = "The single crate permitted to contain unsafe: FFI that no safe wrapper provides."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+
+[features]
+# Enabled when libutempter is available, matching --with-utempter in configure.ac.
+utempter = []
+
+[build-dependencies]
+pkg-config = "0.3"
