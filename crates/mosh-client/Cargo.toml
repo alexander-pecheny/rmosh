@@ -1,0 +1,17 @@
+[package]
+name = "mosh-client"
+description = "The mosh client: renders the screen and predicts what the server will echo."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "mosh_client"
+path = "src/lib.rs"
+
+[dependencies]
+mosh-network = { path = "../mosh-network" }
+mosh-state = { path = "../mosh-state" }
+mosh-sys = { path = "../mosh-sys" }
+mosh-terminal = { path = "../mosh-terminal" }
