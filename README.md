@@ -1,5 +1,5 @@
 > [!NOTE]
-> This is a hand port of [mobile-shell/mosh](https://github.com/mobile-shell/mosh) to Rust, in `crates/`: the terminal emulator, the state synchronisation, the network layer, `mosh-server`, `mosh-client`, and the launcher that replaces the Perl wrapper. See [ADR 0001](docs/adr/0001-hand-port-rather-than-transpile.md) for why it is a hand port.
+> This is a port of [mobile-shell/mosh](https://github.com/mobile-shell/mosh) to Rust, in `crates/`: the terminal emulator, the state synchronisation, the network layer, `mosh-server`, `mosh-client`, and the launcher that replaces the Perl wrapper. It was written module by module against the C++ and its tests rather than run through a transpiler; [ADR 0001](docs/adr/0001-hand-port-rather-than-transpile.md) records why.
 >
 > It carries the two patches this fork started as: forwarding dynamic color queries and OSC 52 clipboard queries to the host terminal.
 >
