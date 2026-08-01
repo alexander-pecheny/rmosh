@@ -7,5 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+mosh-crypto = { path = "../mosh-crypto" }
 mosh-protobufs = { path = "../mosh-protobufs" }
 flate2 = "1"
