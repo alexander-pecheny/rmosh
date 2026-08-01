@@ -162,6 +162,31 @@ pub fn detach() -> std::io::Result<bool> {
     }
 }
 
+/// Point the standard streams at /dev/null.
+///
+/// A detached server must let go of the pipes it inherited, or whoever started it keeps
+/// waiting for end-of-file that never comes. The C++ does this too, and skips it under
+/// -v so that diagnostics remain visible.
+pub fn close_standard_streams() -> std::io::Result<()> {
+    // SAFETY: opening /dev/null and duplicating it over the three standard descriptors
+    // is a plain descriptor operation; nothing is read or written through a pointer.
+    unsafe {
+        let devnull = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+        if devnull < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
+            if libc::dup2(devnull, fd) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        if devnull > libc::STDERR_FILENO {
+            libc::close(devnull);
+        }
+    }
+    Ok(())
+}
+
 /// Ignore a signal, so it cannot kill a detached server.
 pub fn ignore_signal(sig: libc::c_int) {
     // SAFETY: SIG_IGN is a valid disposition for every catchable signal, and signal()

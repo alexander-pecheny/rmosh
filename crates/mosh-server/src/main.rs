@@ -100,6 +100,12 @@ fn run(args: args::Args) -> std::io::Result<()> {
         return Ok(()); // parent
     }
 
+    // Let go of the pipes we inherited, or whoever started us waits forever for
+    // end-of-file. Kept open under -v so diagnostics stay visible, matching the C++.
+    if args.verbose == 0 {
+        let _ = pty::close_standard_streams();
+    }
+
     let terminal = Complete::new(cols as i32, rows as i32);
     let mut transport = Transport::new(connection, terminal, UserStream::new(), now);
     transport.verbose = args.verbose;
@@ -232,11 +238,13 @@ fn serve(
 
         transport.tick(now);
 
-        if let Some(status) = pty::try_wait(child) {
-            child_exit = Some(status);
-        }
+        // Reap the child so it does not linger as a zombie, but do not let its exit
+        // end the session: the pty may still hold output the child wrote just before
+        // exiting. EOF on the pty is the authority for "there is no more output",
+        // which is what the C++ uses.
+        pty::try_wait(child);
 
-        if let Some(_status) = child_exit {
+        if child_exit.is_some() {
             if !transport.sender.shutdown_in_progress() {
                 transport.sender.start_shutdown(now);
             }
