@@ -259,6 +259,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosh-state"
+version = "1.4.0"
+dependencies = [
+ "mosh-protobufs",
+ "mosh-terminal",
+]
+
+[[package]]
 name = "mosh-sys"
 version = "1.4.0"
 dependencies = [

@@ -1,0 +1,11 @@
+[package]
+name = "mosh-state"
+description = "The two synchronised states: the server's screen and the client's keystrokes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mosh-protobufs = { path = "../mosh-protobufs" }
+mosh-terminal = { path = "../mosh-terminal" }

@@ -29,10 +29,16 @@ Reusing one within a Session is a security failure, not merely a bug.
 
 **Instruction** — what one endpoint tells the other in a Datagram: which State it is
 moving from, which State it is moving to, and the last State it heard about from the
-peer. Instructions are idempotent; receiving one twice must equal receiving it once.
+peer. Because an Instruction names the State it moves from, receiving one twice equals
+receiving it once — the second is recognised as already applied and dropped.
 
 **Diff** — the content of an Instruction: the change between two States, never the whole
 State. What a Diff means depends on which direction it travels.
+
+A Diff is a transition, not an operation: it is only meaningful applied to the exact
+State it was computed from, and applying it twice does not equal applying it once. The
+idempotence above is the Instruction's property, earned by naming its starting State,
+and never the Diff's.
 
 ## State
 
