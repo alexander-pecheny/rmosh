@@ -277,6 +277,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosh"
+version = "1.4.0"
+dependencies = [
+ "mosh-sys",
+]
+
+[[package]]
 name = "mosh-client"
 version = "1.4.0"
 dependencies = [

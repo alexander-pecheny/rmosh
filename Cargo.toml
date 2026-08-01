@@ -7,6 +7,7 @@ members = [
     "crates/mosh-terminal",
     "crates/mosh-state",
     "crates/mosh-network",
+    "crates/mosh",
     "crates/mosh-client",
     "crates/mosh-server",
 ]

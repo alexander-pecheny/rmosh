@@ -1,0 +1,14 @@
+[package]
+name = "mosh"
+description = "The mosh launcher: starts a server over ssh and hands off to the client."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mosh"
+path = "src/main.rs"
+
+[dependencies]
+mosh-sys = { path = "../mosh-sys" }
