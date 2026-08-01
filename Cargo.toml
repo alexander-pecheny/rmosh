@@ -4,6 +4,7 @@ members = [
     "crates/mosh-sys",
     "crates/mosh-crypto",
     "crates/mosh-protobufs",
+    "crates/mosh-terminal",
 ]
 
 [workspace.package]

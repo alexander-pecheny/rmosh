@@ -1,0 +1,10 @@
+[package]
+name = "mosh-terminal"
+description = "Terminal emulation: escape sequence parsing, screen state, and frame generation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+mosh-sys = { path = "../mosh-sys" }
