@@ -4,7 +4,7 @@ The goal for the Rust port was to stay within roughly 5% of the C++.
 
 ## What is measured
 
-`src/examples/benchmark.cc` and `crates/mosh-client/examples/benchmark.rs` do the same
+`third_party/mosh/src/examples/benchmark.cc` and `crates/mosh-client/examples/benchmark.rs` do the same
 thing, one iteration per keystroke: predict the character, take the server's screen, lay
 the predictions over it, and compute the frame that turns the previous screen into the
 new one. That is the client's hot path — the work done between a key being pressed and

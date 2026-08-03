@@ -13,11 +13,6 @@ fi
 
 cd "$upstream"
 
-# Let the suite be pointed at the Rust binaries, which is how a session with one endpoint
-# of each is tested. Upstream's scripts hardcode the C++ paths.
-git checkout -- src/tests/e2e-test src/tests/local.test
-git apply "$root/tests/cpp/endpoint-override.patch"
-
 [ -f configure ] || ./autogen.sh
 [ -f Makefile ] || ./configure
 make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"

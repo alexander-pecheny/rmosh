@@ -197,12 +197,15 @@ $ cargo test
 ```
 
 Upstream's own shell tests can drive the Rust binaries, which runs a session with one
-endpoint of each:
+endpoint of each. Their paths are hardcoded, so this is the one time the submodule gets
+patched — revert it afterwards:
 
 ```
 $ cd third_party/mosh
+$ git apply ../../tests/cpp/endpoint-override.patch
 $ MOSH_CLIENT_OVERRIDE=$PWD/../../target/release/mosh-client \
   MOSH_SERVER_OVERRIDE=$PWD/../../target/release/mosh-server make check
+$ git checkout -- src/tests
 ```
 
 Nothing in the submodule is ours to change. Two behaviours diverge from it on purpose:
