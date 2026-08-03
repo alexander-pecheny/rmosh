@@ -8,8 +8,11 @@
 use std::ffi::{CStr, CString};
 
 extern "C" {
-    fn setupterm(term: *const libc::c_char, filedes: libc::c_int, errret: *mut libc::c_int)
-        -> libc::c_int;
+    fn setupterm(
+        term: *const libc::c_char,
+        filedes: libc::c_int,
+        errret: *mut libc::c_int,
+    ) -> libc::c_int;
     fn tigetstr(capname: *const libc::c_char) -> *mut libc::c_char;
     fn tigetflag(capname: *const libc::c_char) -> libc::c_int;
     fn tigetnum(capname: *const libc::c_char) -> libc::c_int;
@@ -28,7 +31,10 @@ impl std::fmt::Display for TermError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TermError::Hardcopy => {
-                write!(f, "Terminal is hardcopy and cannot be used by curses applications.")
+                write!(
+                    f,
+                    "Terminal is hardcopy and cannot be used by curses applications."
+                )
             }
             TermError::UnknownType => write!(f, "Unknown terminal type."),
             TermError::DatabaseMissing => write!(f, "Terminfo database could not be found."),

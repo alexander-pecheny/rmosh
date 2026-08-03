@@ -328,8 +328,14 @@ mod tests {
 
     #[test]
     fn prediction_modes_and_their_aliases() {
-        assert_eq!(parse(&argv(&["mosh", "-a", "h"])).unwrap().predict, Predict::Always);
-        assert_eq!(parse(&argv(&["mosh", "-n", "h"])).unwrap().predict, Predict::Never);
+        assert_eq!(
+            parse(&argv(&["mosh", "-a", "h"])).unwrap().predict,
+            Predict::Always
+        );
+        assert_eq!(
+            parse(&argv(&["mosh", "-n", "h"])).unwrap().predict,
+            Predict::Never
+        );
         assert_eq!(
             parse(&argv(&["mosh", "--predict=experimental", "h"]))
                 .unwrap()
@@ -346,14 +352,22 @@ mod tests {
     fn negatable_options_work_both_ways() {
         assert!(!parse(&argv(&["mosh", "--no-init", "h"])).unwrap().term_init);
         assert!(parse(&argv(&["mosh", "--init", "h"])).unwrap().term_init);
-        assert!(!parse(&argv(&["mosh", "--no-ssh-pty", "h"])).unwrap().ssh_pty);
+        assert!(
+            !parse(&argv(&["mosh", "--no-ssh-pty", "h"]))
+                .unwrap()
+                .ssh_pty
+        );
     }
 
     #[test]
     fn the_remote_ip_method_defaults_to_proxy_and_takes_the_three_spellings() {
         assert_eq!(parse(&argv(&["mosh", "h"])).unwrap().remote_ip, "proxy");
         for method in ["local", "remote", "proxy"] {
-            let o = parse(&argv(&["mosh", &format!("--experimental-remote-ip={method}"), "h"]));
+            let o = parse(&argv(&[
+                "mosh",
+                &format!("--experimental-remote-ip={method}"),
+                "h",
+            ]));
             assert_eq!(o.unwrap().remote_ip, method);
         }
         assert_eq!(
@@ -383,7 +397,9 @@ mod tests {
         assert_eq!(parse(&argv(&["mosh", "-4", "h"])).unwrap().family, "inet");
         assert_eq!(parse(&argv(&["mosh", "-6", "h"])).unwrap().family, "inet6");
         assert_eq!(
-            parse(&argv(&["mosh", "--family=INET6", "h"])).unwrap().family,
+            parse(&argv(&["mosh", "--family=INET6", "h"]))
+                .unwrap()
+                .family,
             "inet6",
             "family should be case-insensitive"
         );

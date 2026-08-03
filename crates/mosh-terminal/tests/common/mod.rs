@@ -3,7 +3,11 @@
 use std::process::Command;
 
 fn pkg_config(flag: &str, package: &str) -> Option<Vec<String>> {
-    let out = Command::new("pkg-config").arg(flag).arg(package).output().ok()?;
+    let out = Command::new("pkg-config")
+        .arg(flag)
+        .arg(package)
+        .output()
+        .ok()?;
     out.status.success().then(|| {
         String::from_utf8_lossy(&out.stdout)
             .split_whitespace()

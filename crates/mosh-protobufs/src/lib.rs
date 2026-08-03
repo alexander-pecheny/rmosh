@@ -117,6 +117,10 @@ mod tests {
             ..Default::default()
         };
         // field 3, wire type 2 => 0x1a.
-        assert_eq!(resize.encode_to_vec()[0], 0x1a, "resize is no longer field 3");
+        assert_eq!(
+            resize.encode_to_vec()[0],
+            0x1a,
+            "resize is no longer field 3"
+        );
     }
 }

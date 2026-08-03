@@ -935,7 +935,9 @@ impl Framebuffer {
 
     pub fn row(&self, row: i32) -> Option<&Row> {
         let row = if row == -1 { self.ds.cursor_row() } else { row };
-        self.rows.get(usize::try_from(row).ok()?).map(|r| r.as_ref())
+        self.rows
+            .get(usize::try_from(row).ok()?)
+            .map(|r| r.as_ref())
     }
 
     pub fn cell(&self, row: i32, col: i32) -> Option<&Cell> {

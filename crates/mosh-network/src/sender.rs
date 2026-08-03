@@ -310,7 +310,11 @@ impl<S: SyncState> TransportSender<S> {
         }
     }
 
-    fn send_empty_ack(&mut self, now: u64, connection: &mut Connection) -> Result<(), FragmentError> {
+    fn send_empty_ack(
+        &mut self,
+        now: u64,
+        connection: &mut Connection,
+    ) -> Result<(), FragmentError> {
         let new_num = if self.shutdown_in_progress {
             SHUTDOWN_NUM
         } else {
@@ -350,7 +354,8 @@ impl<S: SyncState> TransportSender<S> {
         connection: &mut Connection,
     ) -> Result<(), FragmentError> {
         let back_num = self.sent_states.back().expect("never empty").num;
-        let back_state_matches = self.current_state == self.sent_states.back().expect("never empty").state;
+        let back_state_matches =
+            self.current_state == self.sent_states.back().expect("never empty").state;
 
         let new_num = if self.shutdown_in_progress {
             SHUTDOWN_NUM
@@ -509,7 +514,11 @@ mod tests {
         assert_eq!(s.sent_state_acked(), 0);
 
         s.process_acknowledgment_through(2);
-        assert_eq!(s.sent_state_acked(), 2, "did not advance to the acked state");
+        assert_eq!(
+            s.sent_state_acked(),
+            2,
+            "did not advance to the acked state"
+        );
         assert_eq!(s.sent_state_last(), 4, "dropped states newer than the ack");
     }
 
@@ -636,6 +645,9 @@ mod tests {
         let mut s = sender();
         s.current_state = TestState(b"new".to_vec());
         s.calculate_timers(1000, 100.0, 100);
-        assert!(s.next_send_time < u64::MAX, "a change did not schedule a send");
+        assert!(
+            s.next_send_time < u64::MAX,
+            "a change did not schedule a send"
+        );
     }
 }

@@ -138,10 +138,7 @@ fn session(
     transport.sender.set_send_delay(1);
 
     // Tell the server how big our terminal is before anything else.
-    transport
-        .sender
-        .current_state_mut()
-        .push_resize(cols, rows);
+    transport.sender.current_state_mut().push_resize(cols, rows);
 
     let mut predictions = PredictionEngine::new();
     predictions.set_display_preference(predict);
@@ -177,11 +174,9 @@ fn session(
             // Tell the prediction engine what the server has confirmed, which is what
             // lets it retire guesses and judge whether it is guessing well.
             predictions.set_local_frame_acked(transport.sender.sent_state_acked());
+            predictions.set_local_frame_late_acked(transport.get_latest_remote_state().echo_ack());
             predictions
-                .set_local_frame_late_acked(transport.get_latest_remote_state().echo_ack());
-            predictions.set_send_interval(
-                transport.sender.send_interval(transport.connection.srtt()),
-            );
+                .set_send_interval(transport.sender.send_interval(transport.connection.srtt()));
         }
 
         if ready.iter().any(|&i| i >= network_count) {
@@ -206,8 +201,7 @@ fn session(
                             transport.sender.current_state_mut().push_byte(b);
                         }
                     }
-                    predictions
-                        .set_local_frame_sent(transport.sender.sent_state_last());
+                    predictions.set_local_frame_sent(transport.sender.sent_state_last());
                 }
                 Err(ref e)
                     if matches!(

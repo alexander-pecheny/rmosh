@@ -348,8 +348,8 @@ mod tests {
     fn insert_mode_pushes_text_right() {
         let mut emu = Emulator::new(10, 1);
         emu.input(b"world");
-        emu.input(b"\x1b[H");   // home
-        emu.input(b"\x1b[4h");  // insert mode
+        emu.input(b"\x1b[H"); // home
+        emu.input(b"\x1b[4h"); // insert mode
         emu.input(b"AB");
         assert_eq!(screen(&emu)[0], "ABworld");
     }

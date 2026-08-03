@@ -8,7 +8,9 @@
 
 use std::rc::Rc;
 
-use crate::framebuffer::{Cell, ColorType, Framebuffer, Hyperlink, MouseEncodingMode, MouseReportingMode, Renditions, Row};
+use crate::framebuffer::{
+    Cell, ColorType, Framebuffer, Hyperlink, MouseEncodingMode, MouseReportingMode, Renditions, Row,
+};
 
 fn initial_rendition() -> Renditions {
     Renditions::new(0)
@@ -126,7 +128,15 @@ pub struct Display {
 
 /// terminfo has no reliable capability for window titles, so the C++ hardcodes a list of
 /// terminal types known to support them. Kept verbatim.
-const TITLE_TERM_TYPES: &[&str] = &["xterm", "rxvt", "kterm", "Eterm", "alacritty", "screen", "tmux"];
+const TITLE_TERM_TYPES: &[&str] = &[
+    "xterm",
+    "rxvt",
+    "kterm",
+    "Eterm",
+    "alacritty",
+    "screen",
+    "tmux",
+];
 
 impl Display {
     /// Query the terminal's capabilities, or assume a capable terminal.
@@ -245,10 +255,7 @@ impl Display {
         }
 
         // Has the size changed?
-        if !initialized
-            || f.ds.width() != last.ds.width()
-            || f.ds.height() != last.ds.height()
-        {
+        if !initialized || f.ds.width() != last.ds.width() || f.ds.height() != last.ds.height() {
             frame.append("\x1b[r"); // reset scrolling region
             frame.append("\x1b[0m\x1b[H\x1b[2J"); // clear screen
             initialized = false;
@@ -646,7 +653,10 @@ mod tests {
         let frame = d.new_frame(true, before.fb(), after.fb());
         assert!(frame.contains('!'), "the change is missing: {frame:?}");
         // The unchanged text must not be repainted.
-        assert!(!frame.contains("hello"), "repainted the whole row: {frame:?}");
+        assert!(
+            !frame.contains("hello"),
+            "repainted the whole row: {frame:?}"
+        );
     }
 
     #[test]
@@ -715,7 +725,10 @@ mod tests {
         let d = display();
         // Uninitialised means a client is attaching; a stale copy must not be replayed.
         let frame = d.new_frame(false, before.fb(), after.fb());
-        assert!(!frame.contains("\x1b]52;"), "replayed the clipboard: {frame:?}");
+        assert!(
+            !frame.contains("\x1b]52;"),
+            "replayed the clipboard: {frame:?}"
+        );
 
         // Once initialised, the change is forwarded.
         before = Emulator::new(10, 2);
@@ -752,7 +765,10 @@ mod tests {
             let mut after = before.clone();
             after.input(input);
             let frame = d.new_frame(true, before.fb(), after.fb());
-            assert!(frame.contains(expected), "{expected:?} missing from {frame:?}");
+            assert!(
+                frame.contains(expected),
+                "{expected:?} missing from {frame:?}"
+            );
         }
     }
 
@@ -773,7 +789,10 @@ mod tests {
         frame.cursor_x = 5;
         frame.cursor_y = 0;
         frame.append_move(0, 3);
-        assert_eq!(frame.str, "\u{8}\u{8}", "a short move left should backspace");
+        assert_eq!(
+            frame.str, "\u{8}\u{8}",
+            "a short move left should backspace"
+        );
 
         let mut frame = FrameState::new(&Framebuffer::new(80, 24));
         frame.cursor_x = 5;
@@ -808,7 +827,10 @@ mod tests {
         let d = display();
         let frame = d.new_frame(true, before.fb(), after.fb());
         // The scroll shortcut should avoid repainting the surviving rows.
-        assert!(!frame.contains("bbb"), "repainted a scrolled row: {frame:?}");
+        assert!(
+            !frame.contains("bbb"),
+            "repainted a scrolled row: {frame:?}"
+        );
         assert!(frame.contains("ddd"), "new row missing: {frame:?}");
     }
 

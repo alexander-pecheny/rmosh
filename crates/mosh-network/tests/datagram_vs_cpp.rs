@@ -42,7 +42,13 @@ fn build_cpp_harness() -> Option<PathBuf> {
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("datagram-dump-cpp");
     let mut cmd = Command::new("g++");
     // Modern protobuf headers require C++17.
-    cmd.arg("-O2").arg("-std=c++17").arg("-I").arg(&upstream).arg("-o").arg(&out).arg(&source);
+    cmd.arg("-O2")
+        .arg("-std=c++17")
+        .arg("-I")
+        .arg(&upstream)
+        .arg("-o")
+        .arg(&out)
+        .arg(&source);
     for l in libs {
         cmd.arg(upstream.join(l));
     }
@@ -59,13 +65,29 @@ fn build_cpp_harness() -> Option<PathBuf> {
 
 fn pkg_config(flag: &str, package: &str) -> Vec<String> {
     let fallback = || vec![format!("-l{}", package.trim_start_matches("lib"))];
-    let Some(out) = Command::new("pkg-config").arg(flag).arg(package).output().ok() else {
-        return if flag == "--libs" { fallback() } else { Vec::new() };
+    let Some(out) = Command::new("pkg-config")
+        .arg(flag)
+        .arg(package)
+        .output()
+        .ok()
+    else {
+        return if flag == "--libs" {
+            fallback()
+        } else {
+            Vec::new()
+        };
     };
     if !out.status.success() {
-        return if flag == "--libs" { fallback() } else { Vec::new() };
+        return if flag == "--libs" {
+            fallback()
+        } else {
+            Vec::new()
+        };
     }
-    String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect()
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .map(str::to_string)
+        .collect()
 }
 
 /// Run the harness and parse its "key value" output into a lookup.
@@ -153,7 +175,11 @@ fn the_cpp_reads_every_layer_of_our_datagram() {
         0xbeef,
         0xcafe,
     );
-    assert_eq!(datagrams.len(), 1, "small instruction should be one datagram");
+    assert_eq!(
+        datagrams.len(),
+        1,
+        "small instruction should be one datagram"
+    );
 
     let fields = dump(&cpp, &printable, &datagrams[0]);
 
@@ -217,7 +243,10 @@ fn a_high_sequence_number_does_not_leak_into_the_direction_bit() {
         0,
     );
     let fields = dump(&cpp, &key.printable(), &datagrams[0]);
-    assert_eq!(fields["direction"], "0", "sequence number set the direction bit");
+    assert_eq!(
+        fields["direction"], "0",
+        "sequence number set the direction bit"
+    );
     assert_eq!(fields["seq"], seq.to_string());
 }
 
@@ -247,7 +276,11 @@ fn a_fragmented_instruction_is_read_fragment_by_fragment() {
     let mut ids = Vec::new();
     for (i, datagram) in datagrams.iter().enumerate() {
         let fields = dump(&cpp, &key.printable(), datagram);
-        assert_eq!(fields["frag_num"], i.to_string(), "fragment numbering differs");
+        assert_eq!(
+            fields["frag_num"],
+            i.to_string(),
+            "fragment numbering differs"
+        );
         let is_last = i == datagrams.len() - 1;
         assert_eq!(
             fields["frag_final"],
@@ -257,7 +290,10 @@ fn a_fragmented_instruction_is_read_fragment_by_fragment() {
         ids.push(fields["frag_id"].clone());
     }
     // Every fragment of one instruction shares an id, which is how the peer groups them.
-    assert!(ids.windows(2).all(|w| w[0] == w[1]), "fragment ids differ: {ids:?}");
+    assert!(
+        ids.windows(2).all(|w| w[0] == w[1]),
+        "fragment ids differ: {ids:?}"
+    );
 }
 
 #[test]

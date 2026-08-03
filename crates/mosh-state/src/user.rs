@@ -175,7 +175,11 @@ mod tests {
         }
         let diff = s.init_diff();
         let decoded = pb::UserMessage::decode(&diff[..]).unwrap();
-        assert_eq!(decoded.instruction.len(), 1, "keystrokes were not coalesced");
+        assert_eq!(
+            decoded.instruction.len(),
+            1,
+            "keystrokes were not coalesced"
+        );
         assert_eq!(
             decoded.instruction[0].keystroke.as_ref().unwrap().keys,
             Some(b"abc".to_vec())
@@ -200,7 +204,13 @@ mod tests {
         s.push_resize(132, 43);
         let mut applied = UserStream::new();
         applied.apply_string(&s.init_diff()).unwrap();
-        assert_eq!(applied.get(0), Some(UserEvent::Resize { width: 132, height: 43 }));
+        assert_eq!(
+            applied.get(0),
+            Some(UserEvent::Resize {
+                width: 132,
+                height: 43
+            })
+        );
     }
 
     #[test]

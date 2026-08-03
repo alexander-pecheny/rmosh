@@ -118,11 +118,11 @@ const PIECES: &[&[u8]] = &[
     b"H",
     b"A",
     b"hello",
-    b"\xe4\xb8\x80", // wide
-    b"\xc3\xa9",     // accented
+    b"\xe4\xb8\x80",     // wide
+    b"\xc3\xa9",         // accented
     b"\xf0\x9f\x98\x80", // emoji
-    b"\xff",         // never valid UTF-8
-    b"\xe4",         // truncated lead byte
+    b"\xff",             // never valid UTF-8
+    b"\xe4",             // truncated lead byte
     b"\n",
     b"\r",
     b"\x18",

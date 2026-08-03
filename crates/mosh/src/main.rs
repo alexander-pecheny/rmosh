@@ -302,7 +302,9 @@ fn run(o: Opts) -> std::io::Result<()> {
         let line = line.trim_end_matches('\r');
         if let Some(rest) = line.strip_prefix("MOSH IP ") {
             if ip.is_some() {
-                return Err(std::io::Error::other("detected attempt to redefine MOSH IP"));
+                return Err(std::io::Error::other(
+                    "detected attempt to redefine MOSH IP",
+                ));
             }
             ip = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("MOSH SSH_CONNECTION ") {
@@ -377,7 +379,10 @@ fn run(o: Opts) -> std::io::Result<()> {
 
 /// Drop any `user@` prefix; the client connects to the host itself.
 fn strip_user(userhost: &str) -> &str {
-    userhost.rsplit_once('@').map(|(_, h)| h).unwrap_or(userhost)
+    userhost
+        .rsplit_once('@')
+        .map(|(_, h)| h)
+        .unwrap_or(userhost)
 }
 
 #[cfg(test)]

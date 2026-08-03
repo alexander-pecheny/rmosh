@@ -653,7 +653,10 @@ mod tests {
         // section 3.9 the bad prefix yields U+FFFD and 'a' survives.
         let (actions, _) = feed(&[0xe4, b'a']);
         let chars: Vec<Option<char>> = actions.iter().map(|a| a.ch).collect();
-        assert!(chars.contains(&Some('a')), "the trailing 'a' was swallowed: {chars:?}");
+        assert!(
+            chars.contains(&Some('a')),
+            "the trailing 'a' was swallowed: {chars:?}"
+        );
     }
 
     #[test]

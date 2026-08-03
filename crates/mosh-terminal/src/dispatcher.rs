@@ -668,9 +668,8 @@ fn parse_color_query(osc: &[char]) -> Option<String> {
     let separator = body.find(';')?;
     let command = &body[..separator];
 
-    let dynamic_color = command.len() == 2
-        && command.starts_with('1')
-        && command.as_bytes()[1].is_ascii_digit();
+    let dynamic_color =
+        command.len() == 2 && command.starts_with('1') && command.as_bytes()[1].is_ascii_digit();
     if command != "4" && !dynamic_color {
         return None;
     }

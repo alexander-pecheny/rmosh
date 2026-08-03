@@ -178,7 +178,9 @@ impl PredictionEngine {
     }
 
     fn cursor(&self) -> &ConditionalCursorMove {
-        self.cursors.last().expect("cursor list is never empty here")
+        self.cursors
+            .last()
+            .expect("cursor list is never empty here")
     }
 
     fn cursor_mut(&mut self) -> &mut ConditionalCursorMove {
@@ -348,8 +350,9 @@ impl PredictionEngine {
                     Validity::Pending => {
                         // A prediction outstanding a long time means the link is worse
                         // than the round-trip estimate suggests, so show them anyway.
-                        let elapsed = now
-                            .saturating_sub(self.overlays[ri].overlay_cells[ci].base.prediction_time);
+                        let elapsed = now.saturating_sub(
+                            self.overlays[ri].overlay_cells[ci].base.prediction_time,
+                        );
                         if elapsed >= GLITCH_FLAG_THRESHOLD {
                             self.glitch_trigger = GLITCH_REPAIR_COUNT * 2; // show and underline
                         } else if elapsed >= GLITCH_THRESHOLD
@@ -484,10 +487,16 @@ impl PredictionEngine {
         }
 
         // Shift the rest of the row right to make room, unless overwriting.
-        let rightmost = if self.predict_overwrite { col } else { width - 1 };
+        let rightmost = if self.predict_overwrite {
+            col
+        } else {
+            width - 1
+        };
         let mut i = rightmost;
         while i > col {
-            let prev_active = self.overlays[ri].overlay_cells[(i - 1) as usize].base.active;
+            let prev_active = self.overlays[ri].overlay_cells[(i - 1) as usize]
+                .base
+                .active;
             let prev_unknown = self.overlays[ri].overlay_cells[(i - 1) as usize].unknown;
             let prev_replacement = self.overlays[ri].overlay_cells[(i - 1) as usize]
                 .replacement
@@ -601,7 +610,9 @@ impl PredictionEngine {
         // Otherwise the rest of the row shifts left.
         for i in col..width {
             let next_active = if i + 1 < width {
-                self.overlays[ri].overlay_cells[(i + 1) as usize].base.active
+                self.overlays[ri].overlay_cells[(i + 1) as usize]
+                    .base
+                    .active
             } else {
                 false
             };
@@ -902,7 +913,11 @@ mod tests {
         e.new_user_byte(b'x', &fb, 0);
         let mut shown = fb.clone();
         e.apply(&mut shown);
-        assert_eq!(screen_line(&shown, 0), "px", "slow link should show predictions");
+        assert_eq!(
+            screen_line(&shown, 0),
+            "px",
+            "slow link should show predictions"
+        );
 
         // Dropping below the low mark only takes effect once nothing is outstanding,
         // so predictions do not vanish mid-flight.
@@ -910,7 +925,11 @@ mod tests {
         e.cull(&fb, 0);
         let mut shown = fb.clone();
         e.apply(&mut shown);
-        assert_eq!(screen_line(&shown, 0), "px", "should not vanish while active");
+        assert_eq!(
+            screen_line(&shown, 0),
+            "px",
+            "should not vanish while active"
+        );
     }
 
     #[test]
@@ -986,7 +1005,11 @@ mod tests {
         // A carriage return starts a new epoch, because where the line ends up depends
         // on the remote application. The new position is held back until the server
         // confirms something in that epoch, so the shown cursor does not jump early.
-        assert_eq!(shown.ds.cursor_col(), 4, "the new line was shown before confirmation");
+        assert_eq!(
+            shown.ds.cursor_col(),
+            4,
+            "the new line was shown before confirmation"
+        );
         assert_eq!(shown.ds.cursor_row(), 0);
     }
 

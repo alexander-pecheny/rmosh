@@ -119,7 +119,8 @@ mod tests {
 
     #[test]
     fn timestamps_are_big_endian_and_come_first() {
-        let msg = Packet::new(0, Direction::ToServer, 0x0102, 0x0304, b"body".to_vec()).to_message();
+        let msg =
+            Packet::new(0, Direction::ToServer, 0x0102, 0x0304, b"body".to_vec()).to_message();
         assert_eq!(&msg.text[..4], &[0x01, 0x02, 0x03, 0x04]);
         assert_eq!(&msg.text[4..], b"body");
     }

@@ -75,7 +75,10 @@ fn the_client_learns_what_the_server_put_on_the_screen() {
         "server never heard from the client"
     );
 
-    server.sender.current_state_mut().act(b"hello from the host");
+    server
+        .sender
+        .current_state_mut()
+        .act(b"hello from the host");
 
     assert!(
         pump(&mut server, &mut client, &mut clock, |_, c| {

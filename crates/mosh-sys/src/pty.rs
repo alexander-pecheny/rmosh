@@ -55,7 +55,8 @@ pub fn forkpty(rows: u16, cols: u16) -> std::io::Result<ForkPty> {
         child => {
             // SAFETY: forkpty just returned this descriptor to us in the parent and no
             // one else holds it, so taking ownership is sound.
-            let master = unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(master) };
+            let master =
+                unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(master) };
             Ok(ForkPty::Parent { master, child })
         }
     }

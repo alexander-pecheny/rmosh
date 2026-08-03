@@ -25,8 +25,7 @@ mod sys {
             n: libc::size_t,
             ps: *mut MbState,
         ) -> libc::size_t;
-        pub fn wcrtomb(s: *mut libc::c_char, wc: libc::wchar_t, ps: *mut MbState)
-            -> libc::size_t;
+        pub fn wcrtomb(s: *mut libc::c_char, wc: libc::wchar_t, ps: *mut MbState) -> libc::size_t;
     }
 }
 

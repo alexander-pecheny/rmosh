@@ -97,8 +97,7 @@ pub fn parse(argv: &[String]) -> Result<Args, ArgError> {
                             args.colors = v.parse().map_err(|_| ArgError::BadColors(v))?;
                         }
                         'l' => {
-                            if let Some((k, val)) =
-                                value.as_deref().and_then(|v| v.split_once('='))
+                            if let Some((k, val)) = value.as_deref().and_then(|v| v.split_once('='))
                             {
                                 args.locale_vars.push((k.to_string(), val.to_string()));
                             }
@@ -152,7 +151,16 @@ mod tests {
     #[test]
     fn the_test_harness_invocation_parses() {
         // This is what third_party/mosh/src/tests/mosh-server runs.
-        let a = parse(&argv(&["mosh-server", "new", "-vv", "-@", "--", "printf", "hi"])).unwrap();
+        let a = parse(&argv(&[
+            "mosh-server",
+            "new",
+            "-vv",
+            "-@",
+            "--",
+            "printf",
+            "hi",
+        ]))
+        .unwrap();
         assert_eq!(a.verbose, 2);
         assert_eq!(a.command, argv(&["printf", "hi"]));
     }
@@ -160,7 +168,13 @@ mod tests {
     #[test]
     fn the_wrapper_invocation_parses() {
         let a = parse(&argv(&[
-            "mosh-server", "new", "-s", "-c", "256", "-l", "LANG=en_US.UTF-8",
+            "mosh-server",
+            "new",
+            "-s",
+            "-c",
+            "256",
+            "-l",
+            "LANG=en_US.UTF-8",
         ]))
         .unwrap();
         assert_eq!(a.colors, 256);
@@ -170,7 +184,16 @@ mod tests {
     #[test]
     fn the_eating_option_discards_its_argument() {
         // -@ exists so a prepended argv does not confuse the parse.
-        let a = parse(&argv(&["mosh-server", "new", "-v", "-@", "new", "-c", "256"])).unwrap();
+        let a = parse(&argv(&[
+            "mosh-server",
+            "new",
+            "-v",
+            "-@",
+            "new",
+            "-c",
+            "256",
+        ]))
+        .unwrap();
         assert_eq!(a.colors, 256);
         assert_eq!(a.verbose, 1);
     }
@@ -187,7 +210,15 @@ mod tests {
 
     #[test]
     fn addresses_and_ports_are_read() {
-        let a = parse(&argv(&["mosh-server", "new", "-i", "10.0.0.1", "-p", "60000"])).unwrap();
+        let a = parse(&argv(&[
+            "mosh-server",
+            "new",
+            "-i",
+            "10.0.0.1",
+            "-p",
+            "60000",
+        ]))
+        .unwrap();
         assert_eq!(a.desired_ip.as_deref(), Some("10.0.0.1"));
         assert_eq!(a.desired_port.as_deref(), Some("60000"));
     }
@@ -212,8 +243,18 @@ mod tests {
     #[test]
     fn bundled_short_flags_are_counted_separately() {
         // getopt reads -vv as two v flags; the test harness relies on it.
-        assert_eq!(parse(&argv(&["mosh-server", "new", "-vv"])).unwrap().verbose, 2);
-        assert_eq!(parse(&argv(&["mosh-server", "new", "-vvv"])).unwrap().verbose, 3);
+        assert_eq!(
+            parse(&argv(&["mosh-server", "new", "-vv"]))
+                .unwrap()
+                .verbose,
+            2
+        );
+        assert_eq!(
+            parse(&argv(&["mosh-server", "new", "-vvv"]))
+                .unwrap()
+                .verbose,
+            3
+        );
     }
 
     #[test]

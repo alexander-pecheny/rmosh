@@ -43,7 +43,10 @@ fn main() {
 
     // Two framebuffers swapped each round, as the C++ does, so the cost of the copy is
     // measured rather than avoided.
-    let mut local_framebuffers = [Framebuffer::new(width, height), Framebuffer::new(width, height)];
+    let mut local_framebuffers = [
+        Framebuffer::new(width, height),
+        Framebuffer::new(width, height),
+    ];
     let mut fbmod = 0usize;
 
     let mut predictions = PredictionEngine::new();

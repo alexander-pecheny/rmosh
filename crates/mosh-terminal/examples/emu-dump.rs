@@ -11,16 +11,15 @@ fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     let (width, height) = if args.len() > 2 {
-        (
-            args[1].parse().unwrap_or(20),
-            args[2].parse().unwrap_or(6),
-        )
+        (args[1].parse().unwrap_or(20), args[2].parse().unwrap_or(6))
     } else {
         (20, 6)
     };
 
     let mut input = Vec::new();
-    std::io::stdin().read_to_end(&mut input).expect("read stdin");
+    std::io::stdin()
+        .read_to_end(&mut input)
+        .expect("read stdin");
 
     let mut emu = Emulator::new(width, height);
     emu.input(&input);

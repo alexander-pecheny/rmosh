@@ -39,7 +39,10 @@ fn run(tool: &PathBuf, arg: &str, input: &[u8]) -> (Vec<u8>, String) {
         "C++ tool failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    (out.stdout, String::from_utf8_lossy(&out.stderr).into_owned())
+    (
+        out.stdout,
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
 }
 
 #[test]
@@ -70,7 +73,10 @@ fn rust_decrypts_what_cpp_encrypted() {
             .decrypt(&ciphertext)
             .expect("Rust could not decrypt a C++ datagram");
 
-        assert_eq!(message.text, plaintext, "plaintext differs for nonce {nonce_val}");
+        assert_eq!(
+            message.text, plaintext,
+            "plaintext differs for nonce {nonce_val}"
+        );
         assert_eq!(message.nonce.val(), nonce_val, "nonce differs");
     }
 }

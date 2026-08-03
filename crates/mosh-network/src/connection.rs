@@ -265,16 +265,19 @@ impl Connection {
 
     /// Open a client connection to a server that has already announced its key.
     pub fn new_client(key_str: &str, ip: &str, port: u16, now: u64) -> std::io::Result<Self> {
-        let key = Base64Key::parse(key_str).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-        })?;
+        let key = Base64Key::parse(key_str)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
         let session = Session::new(&key);
 
         let remote: SocketAddr = format!("{ip}:{port}")
             .parse()
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad address"))?;
 
-        let bind_addr = if remote.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+        let bind_addr = if remote.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
         let sock = UdpSocket::bind(bind_addr)?;
         sock.set_nonblocking(true)?;
 
@@ -379,7 +382,11 @@ impl Connection {
         let remote = self.remote_addr.ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::NotConnected, "no remote address")
         })?;
-        let bind_addr = if remote.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+        let bind_addr = if remote.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
         let sock = UdpSocket::bind(bind_addr)?;
         sock.set_nonblocking(true)?;
         self.socks.push(sock);
@@ -454,10 +461,18 @@ mod tests {
         let mut state = ConnectionState::new(true, 0);
         // A server accepts ToServer and must refuse ToClient, which is what it sends.
         assert!(state
-            .process(&message(0, Direction::ToServer, 1, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(0, Direction::ToServer, 1, TIMESTAMP_NONE),
+                false,
+                0
+            )
             .is_ok());
         assert_eq!(
-            state.process(&message(1, Direction::ToClient, 1, TIMESTAMP_NONE), false, 0),
+            state.process(
+                &message(1, Direction::ToClient, 1, TIMESTAMP_NONE),
+                false,
+                0
+            ),
             Err(RecvError::WrongDirection)
         );
     }
@@ -466,10 +481,18 @@ mod tests {
     fn a_client_rejects_traffic_sent_towards_the_server() {
         let mut state = ConnectionState::new(false, 0);
         assert!(state
-            .process(&message(0, Direction::ToClient, 1, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(0, Direction::ToClient, 1, TIMESTAMP_NONE),
+                false,
+                0
+            )
             .is_ok());
         assert_eq!(
-            state.process(&message(1, Direction::ToServer, 1, TIMESTAMP_NONE), false, 0),
+            state.process(
+                &message(1, Direction::ToServer, 1, TIMESTAMP_NONE),
+                false,
+                0
+            ),
             Err(RecvError::WrongDirection)
         );
     }
@@ -478,14 +501,22 @@ mod tests {
     fn an_old_datagram_is_delivered_but_does_not_move_the_timestamp() {
         let mut state = ConnectionState::new(true, 0);
         state
-            .process(&message(5, Direction::ToServer, 100, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(5, Direction::ToServer, 100, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
         let saved = state.saved_timestamp;
 
         // A replayed older datagram must not be able to rewind our notion of the peer's
         // clock, which is what a replay attack would try to do.
         let result = state
-            .process(&message(2, Direction::ToServer, 999, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(2, Direction::ToServer, 999, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
         assert!(matches!(result, Received::OutOfOrder(_)));
         assert_eq!(state.saved_timestamp, saved);
@@ -495,10 +526,18 @@ mod tests {
     fn an_out_of_order_datagram_is_still_handed_upwards() {
         let mut state = ConnectionState::new(true, 0);
         state
-            .process(&message(5, Direction::ToServer, 1, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(5, Direction::ToServer, 1, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
         let result = state
-            .process(&message(1, Direction::ToServer, 1, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(1, Direction::ToServer, 1, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
         // Losing it would drop real data; only timing and targeting are withheld.
         assert_eq!(result.into_payload(), b"payload");
@@ -513,7 +552,11 @@ mod tests {
         state
             .process(&message(0, Direction::ToServer, 1, echoed), false, now)
             .unwrap();
-        assert!((state.srtt() - 40.0).abs() < 1.0, "srtt was {}", state.srtt());
+        assert!(
+            (state.srtt() - 40.0).abs() < 1.0,
+            "srtt was {}",
+            state.srtt()
+        );
     }
 
     #[test]
@@ -545,13 +588,21 @@ mod tests {
     fn congestion_pulls_the_reported_timestamp_back() {
         let mut state = ConnectionState::new(true, 0);
         state
-            .process(&message(0, Direction::ToServer, 1000, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(0, Direction::ToServer, 1000, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
         let uncongested = state.saved_timestamp;
 
         let mut state = ConnectionState::new(true, 0);
         state
-            .process(&message(0, Direction::ToServer, 1000, TIMESTAMP_NONE), true, 0)
+            .process(
+                &message(0, Direction::ToServer, 1000, TIMESTAMP_NONE),
+                true,
+                0,
+            )
             .unwrap();
         // The peer is told its packet took longer, so it slows down.
         assert_eq!(
@@ -564,7 +615,11 @@ mod tests {
     fn a_stale_timestamp_is_not_echoed_back() {
         let mut state = ConnectionState::new(true, 0);
         state
-            .process(&message(0, Direction::ToServer, 4242, TIMESTAMP_NONE), false, 0)
+            .process(
+                &message(0, Direction::ToServer, 4242, TIMESTAMP_NONE),
+                false,
+                0,
+            )
             .unwrap();
 
         // Fresh: echo it.
@@ -581,10 +636,7 @@ mod tests {
         let mut state = ConnectionState::new(true, 0);
         // Too short to hold the timestamps.
         let msg = Message::new(Nonce::new(0), vec![0; 2]);
-        assert_eq!(
-            state.process(&msg, false, 0),
-            Err(RecvError::Undecryptable)
-        );
+        assert_eq!(state.process(&msg, false, 0), Err(RecvError::Undecryptable));
     }
 
     #[test]
@@ -596,8 +648,7 @@ mod tests {
         let port = server.port().expect("port");
         let key = server.key();
 
-        let mut client =
-            Connection::new_client(&key, "127.0.0.1", port, now).expect("client");
+        let mut client = Connection::new_client(&key, "127.0.0.1", port, now).expect("client");
 
         client.send(b"hello server".to_vec(), now).unwrap();
 
@@ -659,7 +710,11 @@ mod tests {
         assert_eq!(client.sockets().len(), 2);
 
         client.prune_sockets(1000 + MAX_OLD_SOCKET_AGE);
-        assert_eq!(client.sockets().len(), 2, "dropped while a reply could arrive");
+        assert_eq!(
+            client.sockets().len(),
+            2,
+            "dropped while a reply could arrive"
+        );
 
         client.prune_sockets(1000 + MAX_OLD_SOCKET_AGE + 1);
         assert_eq!(client.sockets().len(), 1);

@@ -215,8 +215,7 @@ impl Fragmenter {
         self.last_mtu = Some(mtu);
 
         let serialized = inst.encode_to_vec();
-        let payload =
-            compressor::compress(&serialized).map_err(|_| FragmentError::Malformed)?;
+        let payload = compressor::compress(&serialized).map_err(|_| FragmentError::Malformed)?;
 
         let mut ret = Vec::new();
         let mut fragment_num: u16 = 0;
@@ -303,7 +302,9 @@ mod tests {
     fn a_large_instruction_is_split_and_reassembled() {
         let mut f = Fragmenter::new();
         // Random-ish content so it does not simply compress away.
-        let big: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8).collect();
+        let big: Vec<u8> = (0..40_000u32)
+            .map(|i| (i.wrapping_mul(2654435761) >> 24) as u8)
+            .collect();
         let inst = instruction(&big);
         let frags = f.make_fragments(&inst, 500).unwrap();
         assert!(frags.len() > 1, "large instruction was not fragmented");
@@ -322,7 +323,9 @@ mod tests {
     #[test]
     fn fragments_may_arrive_out_of_order() {
         let mut f = Fragmenter::new();
-        let big: Vec<u8> = (0..40_000u32).map(|i| (i.wrapping_mul(40503) >> 8) as u8).collect();
+        let big: Vec<u8> = (0..40_000u32)
+            .map(|i| (i.wrapping_mul(40503) >> 8) as u8)
+            .collect();
         let inst = instruction(&big);
         let mut frags = f.make_fragments(&inst, 500).unwrap();
         frags.reverse();
@@ -339,7 +342,9 @@ mod tests {
     #[test]
     fn a_duplicated_fragment_is_ignored() {
         let mut f = Fragmenter::new();
-        let big: Vec<u8> = (0..30_000u32).map(|i| (i.wrapping_mul(2246822519) >> 16) as u8).collect();
+        let big: Vec<u8> = (0..30_000u32)
+            .map(|i| (i.wrapping_mul(2246822519) >> 16) as u8)
+            .collect();
         let inst = instruction(&big);
         let frags = f.make_fragments(&inst, 500).unwrap();
         assert!(frags.len() > 2);
@@ -358,7 +363,9 @@ mod tests {
     #[test]
     fn a_new_instruction_supersedes_a_partial_one() {
         let mut f = Fragmenter::new();
-        let big: Vec<u8> = (0..30_000u32).map(|i| (i.wrapping_mul(7919) >> 8) as u8).collect();
+        let big: Vec<u8> = (0..30_000u32)
+            .map(|i| (i.wrapping_mul(7919) >> 8) as u8)
+            .collect();
         let first = f.make_fragments(&instruction(&big), 500).unwrap();
 
         let mut asm = FragmentAssembly::new();

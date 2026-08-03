@@ -13,7 +13,8 @@ use std::process::{Command, Stdio};
 use mosh_protobufs::{host, transport, user, Message};
 
 fn upstream_protos() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../third_party/mosh/src/protobufs");
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../third_party/mosh/src/protobufs");
     dir.join("hostinput.proto").exists().then_some(dir)
 }
 
@@ -185,7 +186,10 @@ fn empty_diff_is_distinguishable_from_absent_diff() {
         "TransportBuffers.Instruction",
         &with_empty.encode_to_vec(),
     );
-    assert!(text.contains("diff: \"\""), "empty diff was dropped: {text}");
+    assert!(
+        text.contains("diff: \"\""),
+        "empty diff was dropped: {text}"
+    );
 
     let without = transport::Instruction::default();
     assert!(without.encode_to_vec().is_empty());

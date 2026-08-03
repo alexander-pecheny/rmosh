@@ -151,7 +151,8 @@ impl Complete {
             }
         }
 
-        self.input_history.retain(|&(frame, _)| frame >= newest_echo_ack);
+        self.input_history
+            .retain(|&(frame, _)| frame >= newest_echo_ack);
 
         let moved = self.echo_ack != newest_echo_ack;
         self.echo_ack = newest_echo_ack;
@@ -268,7 +269,10 @@ mod tests {
 
         // Compare what is displayed, since row identity cannot survive a round trip
         // through the wire.
-        assert!(!target.compare(&new), "screens differ after applying the diff");
+        assert!(
+            !target.compare(&new),
+            "screens differ after applying the diff"
+        );
     }
 
     #[test]
@@ -353,7 +357,10 @@ mod tests {
         let diff = c.init_diff();
         let mut target = Complete::new(20, 4);
         target.apply_string(&diff).unwrap();
-        assert!(!target.compare(&c), "init diff did not reproduce the screen");
+        assert!(
+            !target.compare(&c),
+            "init diff did not reproduce the screen"
+        );
     }
 
     #[test]

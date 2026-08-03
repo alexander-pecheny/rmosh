@@ -28,7 +28,9 @@ pub enum TransportError {
 impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TransportError::ProtocolVersionMismatch => f.write_str("mosh protocol version mismatch"),
+            TransportError::ProtocolVersionMismatch => {
+                f.write_str("mosh protocol version mismatch")
+            }
             TransportError::Recv(e) => write!(f, "{e}"),
             TransportError::Malformed => f.write_str("malformed instruction"),
         }
@@ -98,7 +100,12 @@ impl<MyState: SyncState, RemoteState: SyncState> Transport<MyState, RemoteState>
             .expect("never empty")
             .state
             .diff_from(&self.last_receiver_state);
-        self.last_receiver_state = self.received_states.last().expect("never empty").state.clone();
+        self.last_receiver_state = self
+            .received_states
+            .last()
+            .expect("never empty")
+            .state
+            .clone();
         diff
     }
 
@@ -156,7 +163,12 @@ impl<MyState: SyncState, RemoteState: SyncState> Transport<MyState, RemoteState>
 
         // Do we have the state it moves from? Without it the diff is meaningless.
         // Dropping here is security-sensitive: it is the other half of idempotency.
-        let Some(reference) = self.received_states.iter().find(|s| s.num == old_num).cloned() else {
+        let Some(reference) = self
+            .received_states
+            .iter()
+            .find(|s| s.num == old_num)
+            .cloned()
+        else {
             return Ok(());
         };
 
@@ -240,8 +252,8 @@ mod tests {
     }
 
     fn transport() -> Transport<TestState, TestState> {
-        let conn = Connection::new_server(Some("127.0.0.1"), 0, 0, 0)
-            .expect("bind an ephemeral port");
+        let conn =
+            Connection::new_server(Some("127.0.0.1"), 0, 0, 0).expect("bind an ephemeral port");
         Transport::new(conn, TestState::default(), TestState::default(), 0)
     }
 
