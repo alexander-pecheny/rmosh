@@ -1,6 +1,6 @@
 //! Splitting an instruction across datagrams, and putting it back together.
 //!
-//! Transliterated from `src/network/transportfragment.cc`.
+//! Transliterated from `third_party/mosh/src/network/transportfragment.cc`.
 //!
 //! The fragment header is on the wire, so its layout is contractual: an 8-byte
 //! instruction id and a 2-byte fragment number, both big-endian, with the top bit of the

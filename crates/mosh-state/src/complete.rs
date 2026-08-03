@@ -1,6 +1,6 @@
 //! The server's state: the screen, plus how much of the user's typing it has echoed.
 //!
-//! Transliterated from `src/statesync/completeterminal.cc`.
+//! Transliterated from `third_party/mosh/src/statesync/completeterminal.cc`.
 
 use mosh_protobufs::{host as pb, Message};
 use mosh_terminal::display::Display;

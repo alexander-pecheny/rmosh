@@ -1,6 +1,6 @@
 //! The datagram payload beneath the encryption: direction, sequence and timestamps.
 //!
-//! Transliterated from the `Packet` half of `src/network/network.cc`.
+//! Transliterated from the `Packet` half of `third_party/mosh/src/network/network.cc`.
 //!
 //! This is the outermost layer of the wire contract. The nonce carries the direction in
 //! its top bit and the sequence number in the rest, and the plaintext begins with two

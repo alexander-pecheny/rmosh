@@ -1,6 +1,6 @@
 //! The screen: cells, rows, cursor state, and the framebuffer that holds them.
 //!
-//! Transliterated from `src/terminal/terminalframebuffer.{h,cc}`.
+//! Transliterated from `third_party/mosh/src/terminal/terminalframebuffer.{h,cc}`.
 //!
 //! Rows are shared between framebuffers and copied only when written to, which is what
 //! makes taking a snapshot of the screen cheap. The C++ does this with `shared_ptr` and

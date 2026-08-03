@@ -1,6 +1,6 @@
 //! The client's state: what the user has typed.
 //!
-//! Transliterated from `src/statesync/user.cc`.
+//! Transliterated from `third_party/mosh/src/statesync/user.cc`.
 
 use mosh_protobufs::{user as pb, Message};
 

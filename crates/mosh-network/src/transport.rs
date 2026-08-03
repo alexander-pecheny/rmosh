@@ -1,6 +1,6 @@
 //! The transport: one endpoint's view of both states, and the rules for advancing them.
 //!
-//! Transliterated from `src/network/networktransport-impl.h`.
+//! Transliterated from `third_party/mosh/src/network/networktransport-impl.h`.
 //!
 //! This is where an Instruction becomes idempotent. It names the state it moves from, so
 //! a repeat is recognised and dropped here rather than being applied twice to a Diff

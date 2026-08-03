@@ -1,10 +1,20 @@
 # Agents
 
-## The C++ tree is frozen
+## Upstream is a read-only submodule
 
-Development happens in `crates/`. The C++ tree under `src/` is kept only so a session
-can be run with a C++ endpoint on one side and a Rust endpoint on the other, which is
-how the port is checked.
+Development happens in `crates/`. Upstream mosh sits unmodified at `third_party/mosh`,
+tracking <https://github.com/mobile-shell/mosh>, and exists so the port can be tested
+against the implementation it has to stay compatible with. Bump it with
+`git submodule update --remote` and expect the differential tests to say what changed.
 
-Do not port fixes or features back into `src/`. A change there is warranted only when
-the reference behaviour a test compares against is itself wrong.
+Never commit a change inside the submodule, and never carry a patch for it in this
+repository. What we do keep is the test scaffolding upstream has no reason to hold: the
+dump helpers in `tests/cpp`, and `endpoint-override.patch`, which lets upstream's own
+shell tests be pointed at the Rust binaries.
+
+Where the two implementations differ on purpose, the difference belongs in the
+differential test as an explicit exception, so that everything else stays strict:
+
+- Colour queries (`OSC 4;n;?`, `OSC 10..19;?`) and clipboard queries are forwarded to
+  the client's terminal here. Upstream drops them.
+- SGR 2 (faint) and SGR 9 (strikethrough) are implemented here. Upstream parses neither.

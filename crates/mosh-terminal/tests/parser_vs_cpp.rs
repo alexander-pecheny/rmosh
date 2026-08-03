@@ -3,11 +3,13 @@
 //! Both implementations read bytes and print one line per action. Any divergence in
 //! state transitions, UTF-8 recovery, or the 0xA0 codepoint folding shows up as a diff.
 //!
-//! Skips when the C++ static libraries have not been built.
+//! Skips unless the upstream submodule has been built; see `tests/cpp/build.sh`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+mod common;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -25,9 +27,10 @@ fn cpp_harness() -> Option<PathBuf> {
 
 fn build_cpp_harness() -> Option<PathBuf> {
     let root = repo_root();
-    let terminal_lib = root.join("src/terminal/libmoshterminal.a");
-    let util_lib = root.join("src/util/libmoshutil.a");
-    let source = root.join("src/tests/parse-dump.cc");
+    let upstream = root.join("third_party/mosh");
+    let terminal_lib = upstream.join("src/terminal/libmoshterminal.a");
+    let util_lib = upstream.join("src/util/libmoshutil.a");
+    let source = root.join("tests/cpp/parse-dump.cc");
     if !terminal_lib.exists() || !util_lib.exists() || !source.exists() {
         return None;
     }
@@ -40,13 +43,13 @@ fn build_cpp_harness() -> Option<PathBuf> {
     let status = Command::new("g++")
         .arg("-O2")
         .arg("-I")
-        .arg(&root)
+        .arg(&upstream)
         .arg("-o")
         .arg(&out)
         .arg(&source)
         .arg(&terminal_lib)
         .arg(&util_lib)
-        .arg("-ltinfo")
+        .args(common::terminfo_libs())
         .status()
         .ok()?;
 

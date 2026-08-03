@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn the_test_harness_invocation_parses() {
-        // This is what src/tests/mosh-server runs.
+        // This is what third_party/mosh/src/tests/mosh-server runs.
         let a = parse(&argv(&["mosh-server", "new", "-vv", "-@", "--", "printf", "hi"])).unwrap();
         assert_eq!(a.verbose, 2);
         assert_eq!(a.command, argv(&["printf", "hi"]));

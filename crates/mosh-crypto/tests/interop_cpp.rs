@@ -13,7 +13,7 @@ use mosh_crypto::{Base64Key, Message, Nonce, Session};
 
 fn cpp_tool(name: &str) -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../src/examples")
+        .join("../../third_party/mosh/src/examples")
         .join(name);
     path.exists().then_some(path)
 }

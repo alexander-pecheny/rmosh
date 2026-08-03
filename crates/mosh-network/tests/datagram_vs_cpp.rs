@@ -5,7 +5,7 @@
 //! way down. The harness decrypts with the C++ crypto, parses the C++ Packet, unwraps the
 //! C++ Fragment and reassembles the C++ Instruction, printing each layer's fields.
 //!
-//! Skips when the C++ static libraries have not been built.
+//! Skips unless the upstream submodule has been built; see `tests/cpp/build.sh`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -27,26 +27,45 @@ fn cpp_harness() -> Option<PathBuf> {
 
 fn build_cpp_harness() -> Option<PathBuf> {
     let root = repo_root();
+    let upstream = root.join("third_party/mosh");
     let libs = [
         "src/network/libmoshnetwork.a",
         "src/crypto/libmoshcrypto.a",
         "src/protobufs/libmoshprotos.a",
         "src/util/libmoshutil.a",
     ];
-    let source = root.join("src/tests/datagram-dump.cc");
-    if !source.exists() || libs.iter().any(|l| !root.join(l).exists()) {
+    let source = root.join("tests/cpp/datagram-dump.cc");
+    if !source.exists() || libs.iter().any(|l| !upstream.join(l).exists()) {
         return None;
     }
 
     let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("datagram-dump-cpp");
     let mut cmd = Command::new("g++");
-    cmd.arg("-O2").arg("-I").arg(&root).arg("-o").arg(&out).arg(&source);
+    // Modern protobuf headers require C++17.
+    cmd.arg("-O2").arg("-std=c++17").arg("-I").arg(&upstream).arg("-o").arg(&out).arg(&source);
     for l in libs {
-        cmd.arg(root.join(l));
+        cmd.arg(upstream.join(l));
     }
-    cmd.arg("-lprotobuf-lite").arg("-lz").arg("-lcrypto");
+    // Upstream's generated headers include protobuf's own, which are not always where
+    // the compiler looks by default.
+    for package in ["protobuf-lite", "libcrypto"] {
+        cmd.args(pkg_config("--cflags", package));
+        cmd.args(pkg_config("--libs", package));
+    }
+    cmd.arg("-lz");
 
     cmd.status().ok()?.success().then_some(out)
+}
+
+fn pkg_config(flag: &str, package: &str) -> Vec<String> {
+    let fallback = || vec![format!("-l{}", package.trim_start_matches("lib"))];
+    let Some(out) = Command::new("pkg-config").arg(flag).arg(package).output().ok() else {
+        return if flag == "--libs" { fallback() } else { Vec::new() };
+    };
+    if !out.status.success() {
+        return if flag == "--libs" { fallback() } else { Vec::new() };
+    }
+    String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect()
 }
 
 /// Run the harness and parse its "key value" output into a lookup.

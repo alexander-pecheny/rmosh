@@ -3,7 +3,7 @@
 >
 > It carries the two patches this fork started as: forwarding dynamic color queries and OSC 52 clipboard queries to the host terminal.
 >
-> The C++ tree is still here and still builds. Either endpoint of a session can be either implementation, which is how the port is checked: `MOSH_CLIENT_OVERRIDE` and `MOSH_SERVER_OVERRIDE` point the existing test suite at the Rust binaries, so a Rust client can be run against a C++ server and the frames compared.
+> Upstream is a submodule at `third_party/mosh`, unmodified, and the port is checked against it: the differential tests compare screens, frames, parser states and whole datagrams between the two implementations, and either endpoint of a session can be either implementation. See [Notes for developers](#notes-for-developers).
 
 [![ci](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml/badge.svg)](https://github.com/mobile-shell/mosh/actions/workflows/ci.yml)
 
@@ -187,35 +187,28 @@ $ cargo build --release
 $ cargo test
 ```
 
-The C++ tree builds as it always did:
+The tests that compare the two implementations need upstream built, which is what
+`tests/cpp/build.sh` does. They skip until it has run:
 
 ```
-$ ./autogen.sh
-$ ./configure
-$ make
-$ make check
+$ git submodule update --init
+$ ./tests/cpp/build.sh
+$ cargo test
 ```
 
-To run the shell tests against the Rust binaries instead, point them at the built
-executables:
+Upstream's own shell tests can drive the Rust binaries, which runs a session with one
+endpoint of each:
 
 ```
-$ MOSH_CLIENT_OVERRIDE=$PWD/target/release/mosh-client \
-  MOSH_SERVER_OVERRIDE=$PWD/target/release/mosh-server make check
+$ cd third_party/mosh
+$ MOSH_CLIENT_OVERRIDE=$PWD/../../target/release/mosh-client \
+  MOSH_SERVER_OVERRIDE=$PWD/../../target/release/mosh-server make check
 ```
 
-Mosh supports producing code coverage reports by tests, but this feature is
-disabled by default. To enable it, make sure `lcov` is installed on your
-system. Then, configure and run tests:
-
-```
-$ ./configure --enable-code-coverage
-$ make check-code-coverage
-```
-
-This will run all tests and produce a coverage report in HTML form that can be
-opened with your favorite browser. Ideally, newly added code should strive for
-90% (or better) incremental test coverage.
+Nothing in the submodule is ours to change. Two behaviours diverge from it on purpose:
+colour and clipboard queries are forwarded to the client's terminal here, and upstream
+ignores SGR 2 and SGR 9, which this implements. The differential tests account for
+exactly those and compare everything else strictly.
 
 More info
 ---------

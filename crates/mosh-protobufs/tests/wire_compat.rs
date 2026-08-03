@@ -1,7 +1,7 @@
 //! Proves our inlined schemas encode identically to upstream's extension-based ones.
 //!
 //! Each test encodes a message with prost and hands the bytes to `protoc`, which parses
-//! them against the *original* `src/protobufs/*.proto` — extensions and all. If inlining
+//! them against the *original* `third_party/mosh/src/protobufs/*.proto` — extensions and all. If inlining
 //! had renumbered or reshaped anything, protoc would fail or report different fields.
 //!
 //! Skips when protoc or the upstream schemas are absent.
@@ -13,7 +13,7 @@ use std::process::{Command, Stdio};
 use mosh_protobufs::{host, transport, user, Message};
 
 fn upstream_protos() -> Option<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src/protobufs");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../third_party/mosh/src/protobufs");
     dir.join("hostinput.proto").exists().then_some(dir)
 }
 

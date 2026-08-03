@@ -1,6 +1,6 @@
 //! Deciding what to send and when.
 //!
-//! Transliterated from `src/network/transportsender-impl.h`.
+//! Transliterated from `third_party/mosh/src/network/transportsender-impl.h`.
 //!
 //! The sender keeps every state it has sent but not had acknowledged, so it can always
 //! diff against something the peer is known or assumed to hold. The C++ tracks the

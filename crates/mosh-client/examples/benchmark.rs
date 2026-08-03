@@ -1,4 +1,4 @@
-//! The perf comparison against `src/examples/benchmark.cc`.
+//! The perf comparison against `third_party/mosh/src/examples/benchmark.cc`.
 //!
 //! One iteration is what the client does for every keystroke: predict the character,
 //! take the server's screen, lay the predictions over it, and compute the frame that

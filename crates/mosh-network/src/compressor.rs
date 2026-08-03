@@ -1,6 +1,6 @@
 //! zlib compression of the payload before it is fragmented.
 //!
-//! Transliterated from `src/network/compressor.cc`.
+//! Transliterated from `third_party/mosh/src/network/compressor.cc`.
 //!
 //! Only the format is contractual, not the bytes: the peer inflates whatever we produce,
 //! so a different deflate implementation is fine as long as it writes a zlib stream. The

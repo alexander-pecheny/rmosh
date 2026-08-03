@@ -202,7 +202,7 @@ pub fn detach() -> std::io::Result<bool> {
 ///
 /// The pty master needs this: a ^S written between the poll and the read can leave
 /// read() blocking even though poll said data was ready, which wedges everything
-/// attached to the pty. See src/tests/pty-deadlock.test.
+/// attached to the pty. See third_party/mosh/src/tests/pty-deadlock.test.
 pub fn set_nonblocking(fd: RawFd) -> std::io::Result<()> {
     // SAFETY: both calls only read and write the descriptor's own flags.
     unsafe {

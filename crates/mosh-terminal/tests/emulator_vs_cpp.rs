@@ -4,11 +4,13 @@
 //! cell with its grapheme, renditions and flags, plus the cursor, modes and scrolling
 //! region. Any divergence anywhere in the stack shows up as a diff.
 //!
-//! Skips when the C++ static libraries have not been built.
+//! Skips unless the upstream submodule has been built; see `tests/cpp/build.sh`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+mod common;
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -21,9 +23,10 @@ fn cpp_harness() -> Option<PathBuf> {
 
 fn build_cpp_harness() -> Option<PathBuf> {
     let root = repo_root();
-    let terminal_lib = root.join("src/terminal/libmoshterminal.a");
-    let util_lib = root.join("src/util/libmoshutil.a");
-    let source = root.join("src/tests/emu-dump.cc");
+    let upstream = root.join("third_party/mosh");
+    let terminal_lib = upstream.join("src/terminal/libmoshterminal.a");
+    let util_lib = upstream.join("src/util/libmoshutil.a");
+    let source = root.join("tests/cpp/emu-dump.cc");
     if !terminal_lib.exists() || !util_lib.exists() || !source.exists() {
         return None;
     }
@@ -32,13 +35,13 @@ fn build_cpp_harness() -> Option<PathBuf> {
     let status = Command::new("g++")
         .arg("-O2")
         .arg("-I")
-        .arg(&root)
+        .arg(&upstream)
         .arg("-o")
         .arg(&out)
         .arg(&source)
         .arg(&terminal_lib)
         .arg(&util_lib)
-        .arg("-ltinfo")
+        .args(common::terminfo_libs())
         .status()
         .ok()?;
 
@@ -115,8 +118,8 @@ fn compare(width: i32, height: i32, input: &[u8], label: &str) {
         return;
     }
 
-    let cpp_out = run(&cpp, width, height, input);
-    let rust_out = run(&rust, width, height, input);
+    let cpp_out = common::strip_attributes_upstream_lacks(&run(&cpp, width, height, input));
+    let rust_out = common::strip_attributes_upstream_lacks(&run(&rust, width, height, input));
 
     if cpp_out != rust_out {
         let diff: Vec<String> = cpp_out
@@ -183,8 +186,6 @@ fn screens_match_on_hand_written_sequences() {
         ("osc title", b"\x1b]0;title here\x07"),
         ("osc clipboard", b"\x1b]52;c;aGVsbG8=\x07"),
         ("osc hyperlink", b"\x1b]8;id=1;http://example.com\x07link\x1b]8;;\x07"),
-        ("colour query", b"\x1b]4;1;?\x07"),
-        ("dynamic colour query", b"\x1b]11;?\x07"),
         ("decaln", b"\x1b#8"),
         ("soft reset", b"\x1b[1m\x1b[!p"),
         ("full reset", b"\x1b[1mabc\x1bc"),

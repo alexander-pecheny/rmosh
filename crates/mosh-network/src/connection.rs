@@ -1,6 +1,6 @@
 //! The datagram connection: sockets, roaming, replay rejection and round-trip timing.
 //!
-//! Transliterated from the `Connection` half of `src/network/network.cc`.
+//! Transliterated from the `Connection` half of `third_party/mosh/src/network/network.cc`.
 //!
 //! The protocol logic is split out from the socket I/O. The C++ has them interleaved in
 //! `recv_one`, which means none of the replay, timestamp or RTT handling can be tested

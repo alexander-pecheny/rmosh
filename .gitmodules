@@ -1,0 +1,4 @@
+[submodule "third_party/mosh"]
+	path = third_party/mosh
+	url = https://github.com/mobile-shell/mosh
+	branch = master

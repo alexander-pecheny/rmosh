@@ -1,6 +1,6 @@
 //! Guessing what the server will echo, and withdrawing the guess when it does not.
 //!
-//! Transliterated from `PredictionEngine` in `src/frontend/terminaloverlay.cc`.
+//! Transliterated from `PredictionEngine` in `third_party/mosh/src/frontend/terminaloverlay.cc`.
 //!
 //! Predictions are grouped into epochs. When one turns out wrong, the whole epoch it
 //! belongs to is abandoned rather than the individual guess, because a wrong prediction

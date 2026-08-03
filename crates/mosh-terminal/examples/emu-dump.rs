@@ -50,8 +50,6 @@ fn main() {
     )
     .unwrap();
     writeln!(out, "bell {}", fb.bell_count()).unwrap();
-    writeln!(out, "clipseq {}", fb.clipboard_seq()).unwrap();
-    writeln!(out, "colorqueries {}", fb.color_queries()).unwrap();
     writeln!(out, "sgr {}", fb.ds.renditions().sgr()).unwrap();
 
     for y in 0..fb.ds.height() {

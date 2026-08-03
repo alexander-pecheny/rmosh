@@ -1,6 +1,6 @@
 //! The X.364 escape-sequence state machine.
 //!
-//! Transliterated from `src/terminal/parserstate.cc`. The C++ models each state as a
+//! Transliterated from `third_party/mosh/src/terminal/parserstate.cc`. The C++ models each state as a
 //! class in a hierarchy and each action as a heap-allocated object; here both are enums,
 //! which is the same machine without the allocation. State names and the order of rules
 //! within each state are kept identical to the C++ so the two can be read side by side.

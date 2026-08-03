@@ -1,6 +1,6 @@
 //! Speculative changes the client shows before the server has confirmed them.
 //!
-//! Transliterated from the overlay types in `src/frontend/terminaloverlay.{h,cc}`.
+//! Transliterated from the overlay types in `third_party/mosh/src/frontend/terminaloverlay.{h,cc}`.
 //!
 //! A prediction is provisional: it is displayed, then later judged against what the
 //! server actually sent. Judging it is the delicate part, because a prediction that

@@ -1,6 +1,6 @@
 //! The mosh server: owns the pty and the authoritative screen.
 //!
-//! Transliterated from `src/frontend/mosh-server.cc`.
+//! Transliterated from `third_party/mosh/src/frontend/mosh-server.cc`.
 
 #![forbid(unsafe_code)]
 
