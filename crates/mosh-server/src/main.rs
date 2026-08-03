@@ -166,6 +166,9 @@ fn serve(
     // background process the child started still holds the slave, so this alone must
     // not end the session -- we drain first.
     let mut child_reaped = false;
+    // The state number carrying colour queries the client has not acknowledged yet,
+    // with the query sequence they were sent at.
+    let mut queries_in_flight: Option<(u64, u32)> = None;
     let network_timeout = network_timeout_from_env();
 
     loop {
@@ -285,7 +288,26 @@ fn serve(
             transport.sender.current_state_mut().set_echo_ack(now);
         }
 
+        // A colour query stays in the state until the client acknowledges the state
+        // that carries it, so that neither a later batch of output nor a lost packet
+        // can strand the application waiting for a reply.
+        let sent_before = transport.sender.sent_state_last();
         transport.tick(now);
+        if queries_in_flight.is_none() && transport.sender.sent_state_last() != sent_before {
+            let fb = transport.sender.current_state().fb();
+            if !fb.color_queries().is_empty() {
+                queries_in_flight =
+                    Some((transport.sender.sent_state_last(), fb.color_query_seq()));
+            }
+        }
+        if let Some((num, seq)) = queries_in_flight {
+            if transport.sender.sent_state_acked() >= num {
+                if transport.sender.current_state().fb().color_query_seq() == seq {
+                    transport.sender.current_state_mut().clear_color_queries();
+                }
+                queries_in_flight = None;
+            }
+        }
 
         // Reap the child so it does not linger as a zombie. Its exit alone does not end
         // the session: output it wrote just before exiting may still be in the pty.

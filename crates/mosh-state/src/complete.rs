@@ -47,10 +47,16 @@ impl Complete {
 
     /// Feed output from the host, returning whatever the terminal owes it in reply.
     pub fn act(&mut self, bytes: &[u8]) -> String {
-        // Only the queries raised by this batch of output are still awaiting a reply.
-        self.terminal.clear_color_queries();
         self.terminal.input(bytes);
         self.terminal.read_octets_to_host()
+    }
+
+    /// Forget the colour queries, which the client has by now been told about.
+    ///
+    /// They accumulate until then: an application writes more than one batch of output
+    /// before we transmit, and dropping the earlier batch's queries would lose them.
+    pub fn clear_color_queries(&mut self) {
+        self.terminal.clear_color_queries();
     }
 
     /// Apply a resize.
@@ -263,6 +269,17 @@ mod tests {
         // Compare what is displayed, since row identity cannot survive a round trip
         // through the wire.
         assert!(!target.compare(&new), "screens differ after applying the diff");
+    }
+
+    #[test]
+    fn colour_queries_outlive_the_batch_that_raised_them() {
+        let mut c = Complete::new(20, 4);
+        c.act(b"\x1b]11;?\x1b\\");
+        c.act(b"more output");
+        assert_eq!(c.fb().color_queries(), "\x1b]11;?\x1b\\");
+
+        c.clear_color_queries();
+        assert!(c.fb().color_queries().is_empty());
     }
 
     #[test]
