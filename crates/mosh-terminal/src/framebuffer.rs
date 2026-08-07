@@ -874,9 +874,31 @@ pub struct Framebuffer {
     pub ds: DrawState,
 }
 
+/// Largest terminal we will represent, in either direction.
+///
+/// A size arrives from the peer, and a framebuffer costs width by height cells, so it has
+/// to be bounded somewhere or a number chosen on the wire becomes an allocation the
+/// machine cannot meet. This is the ceiling the compressor already imposes on a state
+/// update, and it is far beyond any real terminal.
+pub const MAX_DIMENSION: i32 = 2048;
+
+/// Bring a requested terminal size into the range we can represent.
+///
+/// A terminal has at least one cell and at most [`MAX_DIMENSION`] in each direction.
+/// Sizes reach here from a peer's resize message and from a terminal reporting its own
+/// dimensions, so neither end of the range may be assumed: the C++ asserts instead, which
+/// turns a value an attacker picked into an abort. Both endpoints clamp the same way, so
+/// they still agree on the screen afterwards.
+pub fn clamp_size(width: i32, height: i32) -> (i32, i32) {
+    (
+        width.clamp(1, MAX_DIMENSION),
+        height.clamp(1, MAX_DIMENSION),
+    )
+}
+
 impl Framebuffer {
     pub fn new(width: i32, height: i32) -> Self {
-        assert!(width > 0 && height > 0);
+        let (width, height) = clamp_size(width, height);
         let row = Rc::new(Row::new(width as usize, 0));
         Framebuffer {
             rows: vec![row; height as usize],
@@ -1124,7 +1146,7 @@ impl Framebuffer {
     }
 
     pub fn resize(&mut self, width: i32, height: i32) {
-        assert!(width > 0 && height > 0);
+        let (width, height) = clamp_size(width, height);
 
         let oldheight = self.ds.height();
         let oldwidth = self.ds.width();

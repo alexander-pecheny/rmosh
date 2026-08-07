@@ -53,8 +53,13 @@ impl UserStream {
             self.actions.clear();
             return;
         }
+        // The C++ asserts that `prefix` really is one. A receiver reaches here holding
+        // states a peer chose the lineage of, so stop at the first event that does not
+        // match instead: removing only what is genuinely shared is always sound.
         for event in &prefix.actions {
-            debug_assert_eq!(Some(event), self.actions.front());
+            if self.actions.front() != Some(event) {
+                return;
+            }
             self.actions.pop_front();
         }
     }

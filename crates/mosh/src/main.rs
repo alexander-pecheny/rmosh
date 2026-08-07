@@ -297,9 +297,17 @@ fn run(o: Opts) -> std::io::Result<()> {
     let mut key = None;
     let mut sship = None;
 
-    for line in BufReader::new(stdout).lines() {
-        let line = line?;
-        let line = line.trim_end_matches('\r');
+    // Read bytes, not text. Everything before the handshake is the remote shell talking,
+    // and a login banner in any encoding but UTF-8 would otherwise end the connection
+    // before the handshake was ever reached. The Perl reads bytes for the same reason.
+    let mut stdout = BufReader::new(stdout);
+    loop {
+        let mut raw = Vec::new();
+        if stdout.read_until(b'\n', &mut raw)? == 0 {
+            break;
+        }
+        let line = String::from_utf8_lossy(&raw);
+        let line = line.trim_end_matches('\n').trim_end_matches('\r');
         if let Some(rest) = line.strip_prefix("MOSH IP ") {
             if ip.is_some() {
                 return Err(std::io::Error::other(
@@ -318,9 +326,17 @@ fn run(o: Opts) -> std::io::Result<()> {
             };
             sship = Some(server_ip.to_string());
         } else if let Some(rest) = line.strip_prefix("MOSH CONNECT ") {
+            // Both halves are checked for shape before they go anywhere. They arrive
+            // from the far end of an ssh session, and the port becomes an argument to
+            // the client, where a value beginning with '-' would read as an option.
             let mut parts = rest.split_whitespace();
-            match (parts.next(), parts.next()) {
-                (Some(p), Some(k)) if k.len() == 22 => {
+            match (parts.next(), parts.next(), parts.next()) {
+                (Some(p), Some(k), None)
+                    if p.parse::<u16>().is_ok()
+                        && k.len() == 22
+                        && k.bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/') =>
+                {
                     port = Some(p.to_string());
                     key = Some(k.to_string());
                     break;

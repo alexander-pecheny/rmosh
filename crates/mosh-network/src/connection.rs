@@ -120,8 +120,9 @@ impl ConnectionState {
     pub fn new_packet(&self, seq: u64, payload: Vec<u8>, now: u64) -> Packet {
         let mut outgoing_timestamp_reply = TIMESTAMP_NONE;
         // Only echo a timestamp we heard recently; a stale one would inflate the peer's
-        // round-trip estimate.
-        if now - self.saved_timestamp_received_at < 1000 {
+        // round-trip estimate. Saturating, because the clock has been seen to step back
+        // across a suspend and the wrapped difference would read as ancient.
+        if now.saturating_sub(self.saved_timestamp_received_at) < 1000 {
             outgoing_timestamp_reply = self.saved_timestamp;
         }
         Packet::new(

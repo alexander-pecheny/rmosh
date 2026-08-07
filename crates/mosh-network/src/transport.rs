@@ -100,6 +100,16 @@ impl<MyState: SyncState, RemoteState: SyncState> Transport<MyState, RemoteState>
             .expect("never empty")
             .state
             .diff_from(&self.last_receiver_state);
+
+        // Every received state shares the oldest one as a prefix, and the caller has now
+        // consumed it. Dropping it from each is what keeps a long session's queue from
+        // holding everything the peer has ever sent, in as many copies as there are
+        // states -- and the peer decides how fast that grows.
+        let oldest = self.received_states[0].state.clone();
+        for s in self.received_states.iter_mut() {
+            s.state.subtract(&oldest);
+        }
+
         self.last_receiver_state = self
             .received_states
             .last()
@@ -212,12 +222,18 @@ impl<MyState: SyncState, RemoteState: SyncState> Transport<MyState, RemoteState>
     }
 
     /// Discard remote states the peer says it will never refer to again.
+    ///
+    /// The number is the peer's, so it may name a state newer than any we hold. The
+    /// queue is ordered by state number and its newest entry always survives: leaving it
+    /// empty would strand us with no reference to diff the next instruction against.
     fn process_throwaway_until(&mut self, throwaway_num: u64) {
-        self.received_states.retain(|s| s.num >= throwaway_num);
-        if self.received_states.is_empty() {
-            // Never leave the queue empty; there must always be a reference state.
-            unreachable!("throwaway must not empty the received-state queue");
-        }
+        let newest = self.received_states.len() - 1;
+        let keep_from = self
+            .received_states
+            .iter()
+            .position(|s| s.num >= throwaway_num)
+            .unwrap_or(newest);
+        self.received_states.drain(..keep_from);
     }
 
     pub fn tick(&mut self, now: u64) {
@@ -238,7 +254,11 @@ mod tests {
     struct TestState(Vec<u8>);
 
     impl SyncState for TestState {
-        fn subtract(&mut self, _p: &Self) {}
+        fn subtract(&mut self, prefix: &Self) {
+            if self.0.starts_with(&prefix.0) {
+                self.0.drain(..prefix.0.len());
+            }
+        }
         fn diff_from(&self, existing: &Self) -> Vec<u8> {
             self.0[existing.0.len().min(self.0.len())..].to_vec()
         }
@@ -334,6 +354,35 @@ mod tests {
         // States below the throwaway number are gone, but a reference always remains.
         assert!(t.received_states.iter().all(|s| s.num >= 2));
         assert!(!t.received_states.is_empty());
+    }
+
+    #[test]
+    fn reading_the_remote_diff_stops_the_queue_growing_without_bound() {
+        let mut t = transport();
+        for i in 1..=200u64 {
+            let mut m = inst(i - 1, i, b"typed");
+            // The peer stops referring to states it has seen acknowledged.
+            m.throwaway_num = Some(i - 1);
+            t.apply_instruction(&m, 0).unwrap();
+            assert_eq!(t.get_remote_diff(), b"typed");
+        }
+        // Each round's input is consumed as it arrives, so what the queue still holds
+        // must not grow with the length of the session.
+        let held: usize = t.received_states.iter().map(|s| s.state.0.len()).sum();
+        assert!(held <= b"typed".len(), "the queue is holding {held} bytes");
+    }
+
+    #[test]
+    fn a_throwaway_past_everything_we_hold_is_survived() {
+        let mut t = transport();
+        // The number comes straight off the wire, so a peer can name a state newer than
+        // any we have. Honouring it literally would empty the queue and leave nothing to
+        // diff the next instruction against.
+        let mut i = inst(0, 1, b"x");
+        i.throwaway_num = Some(u64::MAX);
+        t.apply_instruction(&i, 0).unwrap();
+        assert!(!t.received_states.is_empty());
+        assert_eq!(t.remote_state_num(), 1);
     }
 
     #[test]

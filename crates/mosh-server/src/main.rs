@@ -20,7 +20,7 @@ use mosh_sys::pty;
 fn network_timeout_from_env() -> Option<u64> {
     let raw = std::env::var("MOSH_SERVER_NETWORK_TMOUT").ok()?;
     match raw.trim().parse::<i64>() {
-        Ok(v) if v >= 0 => Some(v as u64 * 1000),
+        Ok(v) if v >= 0 => Some((v as u64).saturating_mul(1000)),
         Ok(_) => {
             eprintln!("MOSH_SERVER_NETWORK_TMOUT is negative, ignoring");
             None
@@ -132,6 +132,12 @@ fn run(args: args::Args) -> std::io::Result<()> {
     // Allocate the pty and start the child.
     let (master, child) = match pty::forkpty(rows, cols)? {
         pty::ForkPty::Child => {
+            // The signals we arranged to survive are ours alone. SIG_IGN outlives exec,
+            // so leaving them would give the user's shell, and everything it ever starts,
+            // a session where no pipe closing and no hangup is ever noticed.
+            pty::reset_signal(libc_sighup());
+            pty::reset_signal(libc_sigpipe());
+
             let (program, argv) = child_command(&args);
             let env = child_env(&args);
             let e = pty::exec(&program, &argv, &env);
@@ -221,6 +227,13 @@ fn serve(
                                 if matches!(us.get(i + 1), Some(UserEvent::Resize { .. })) {
                                     continue;
                                 }
+                                // The size is the client's, so it can be zero, negative,
+                                // or past what a winsize can hold. Clamp once and use
+                                // the same numbers for the pty and for our own screen,
+                                // or the two would disagree about the size of the
+                                // terminal the child is writing to.
+                                let (width, height) =
+                                    mosh_terminal::framebuffer::clamp_size(width, height);
                                 let _ = pty::set_window_size(master, height as u16, width as u16);
                                 let reply = transport
                                     .sender

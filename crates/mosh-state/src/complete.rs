@@ -123,10 +123,10 @@ impl Complete {
 
         for inst in &input.instruction {
             if let Some(hostbytes) = &inst.hostbytes {
-                let reply = self.act(hostbytes.hoststring.as_deref().unwrap_or(&[]));
-                // The server never interrogates the client's terminal, so applying host
-                // output must not produce anything to send back.
-                debug_assert!(reply.is_empty());
+                // An honest server never interrogates our terminal, so this is normally
+                // empty. A hostile one can send a device-attributes query and get a
+                // reply, which is simply dropped: a state update is not a channel back.
+                let _reply = self.act(hostbytes.hoststring.as_deref().unwrap_or(&[]));
             } else if let Some(resize) = &inst.resize {
                 self.act_resize(resize.width.unwrap_or(0), resize.height.unwrap_or(0));
             } else if let Some(echoack) = &inst.echoack {
@@ -361,6 +361,44 @@ mod tests {
             !target.compare(&c),
             "init diff did not reproduce the screen"
         );
+    }
+
+    #[test]
+    fn a_resize_the_peer_chose_cannot_kill_us() {
+        // Both ends take the size straight off the wire: the client from a resize in the
+        // host message, the server from a UserEvent::Resize. Every one of these used to
+        // abort the process, and the large ones used to allocate until the kernel did.
+        for (w, h) in [
+            (0, 24),
+            (80, 0),
+            (-1, -1),
+            (i32::MIN, i32::MIN),
+            (i32::MAX, 1),
+            (i32::MAX, i32::MAX),
+        ] {
+            let mut c = Complete::new(80, 24);
+            c.act_resize(w, h);
+            assert!(c.fb().ds.width() >= 1 && c.fb().ds.height() >= 1);
+            // Still a working terminal afterwards, not a wedged one.
+            c.act(b"hello");
+        }
+    }
+
+    #[test]
+    fn a_hostile_server_asking_our_terminal_a_question_is_not_fatal() {
+        // A device-attributes query in a state update makes the emulator produce a reply
+        // the client has nowhere to send. Dropping it must not be an assertion.
+        let mut c = Complete::new(80, 24);
+        let hostile = pb::HostMessage {
+            instruction: vec![pb::Instruction {
+                hostbytes: Some(pb::HostBytes {
+                    hoststring: Some(b"\x1b[c".to_vec()),
+                }),
+                ..Default::default()
+            }],
+        }
+        .encode_to_vec();
+        assert!(c.apply_string(&hostile).is_ok());
     }
 
     #[test]

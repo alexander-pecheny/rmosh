@@ -168,7 +168,15 @@ pub fn parse(argv: &[String]) -> Result<Opts, OptError> {
             "--family" => o.family = take(&mut i)?.to_lowercase(),
             "-4" => o.family = "inet".into(),
             "-6" => o.family = "inet6".into(),
-            "--ssh" => o.ssh = shellwords(&take(&mut i)?),
+            "--ssh" => {
+                let words = shellwords(&take(&mut i)?);
+                // The first word is the program to run, so an empty command line has
+                // nothing to launch.
+                if words.is_empty() {
+                    return Err(OptError::MissingValue("--ssh".into()));
+                }
+                o.ssh = words;
+            }
             "--ssh-pty" => o.ssh_pty = true,
             "--no-ssh-pty" => o.ssh_pty = false,
             "--init" => o.term_init = true,
@@ -403,6 +411,13 @@ mod tests {
             "inet6",
             "family should be case-insensitive"
         );
+    }
+
+    #[test]
+    fn an_empty_ssh_command_line_is_refused() {
+        // There is no program to launch, and indexing the first word would panic.
+        assert!(parse(&argv(&["mosh", "--ssh=", "h"])).is_err());
+        assert!(parse(&argv(&["mosh", "--ssh", "   ", "h"])).is_err());
     }
 
     #[test]

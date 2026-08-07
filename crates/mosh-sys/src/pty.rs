@@ -252,6 +252,19 @@ pub fn ignore_signal(sig: libc::c_int) {
     }
 }
 
+/// Restore a signal's default disposition.
+///
+/// A child must run this for everything the server ignores. An ignored signal, unlike a
+/// handler, survives `exec`, so without it the user's shell and every process it starts
+/// would inherit the server's own arrangements.
+pub fn reset_signal(sig: libc::c_int) {
+    // SAFETY: SIG_DFL is a valid disposition for every signal, and signal() with it has
+    // no handler to be unsafe about. Async-signal-safe, so sound between fork and exec.
+    unsafe {
+        libc::signal(sig, libc::SIG_DFL);
+    }
+}
+
 /// Reap a child if it has exited. Returns its exit status when it has.
 pub fn try_wait(child: libc::pid_t) -> Option<i32> {
     let mut status: libc::c_int = 0;
@@ -275,11 +288,19 @@ pub fn now_ms() -> u64 {
         tv_sec: 0,
         tv_nsec: 0,
     };
-    // SAFETY: ts points at a live local we own; CLOCK_MONOTONIC is always available.
-    unsafe {
-        libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts);
+    // The newest reading, to fall back on. A failed call leaves `ts` zeroed, and
+    // answering zero would read as the clock jumping back to the start of the session,
+    // which every timeout in the protocol would then misjudge.
+    static LAST_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    use std::sync::atomic::Ordering::Relaxed;
+
+    // SAFETY: ts points at a live local we own.
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) } != 0 {
+        return LAST_MS.load(Relaxed);
     }
-    (ts.tv_sec as u64) * 1000 + (ts.tv_nsec as u64) / 1_000_000
+    let ms = (ts.tv_sec as u64) * 1000 + (ts.tv_nsec as u64) / 1_000_000;
+    LAST_MS.fetch_max(ms, Relaxed);
+    ms
 }
 
 /// Wait until one of `fds` is readable, or `timeout_ms` elapses.

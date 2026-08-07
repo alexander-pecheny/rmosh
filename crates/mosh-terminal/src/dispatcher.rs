@@ -660,21 +660,34 @@ fn osc_8(osc: &str, fb: &mut Framebuffer) {
 ///
 /// mosh has no colours of its own to report, so the query is forwarded to the client's
 /// terminal and the reply reaches the application as ordinary input.
+///
+/// Every field has to be checked, not just the first and the last. Both sequences *set* a
+/// colour when handed anything other than `?`, and both take repeated fields, so a
+/// trailing `?` alone would be enough to smuggle a run of assignments through to the
+/// user's real terminal -- foreground set equal to background, say, which leaves nothing
+/// on screen readable.
 fn parse_color_query(osc: &[char]) -> Option<String> {
-    if osc.last() != Some(&'?') {
-        return None;
-    }
     let body = parse_printable_osc(osc)?;
-    let separator = body.find(';')?;
-    let command = &body[..separator];
+    let (command, rest) = body.split_once(';')?;
 
-    let dynamic_color =
-        command.len() == 2 && command.starts_with('1') && command.as_bytes()[1].is_ascii_digit();
-    if command != "4" && !dynamic_color {
+    let is_query = if command == "4" {
+        // A palette query is index and question, repeated.
+        let fields: Vec<&str> = rest.split(';').collect();
+        fields.len() % 2 == 0
+            && fields.chunks(2).all(|pair| {
+                !pair[0].is_empty() && pair[0].chars().all(|c| c.is_ascii_digit()) && pair[1] == "?"
+            })
+    } else if command.len() == 2
+        && command.starts_with('1')
+        && command.as_bytes()[1].is_ascii_digit()
+    {
+        // A dynamic colour query names no index, so the question is all that may follow.
+        rest == "?"
+    } else {
         return None;
-    }
+    };
 
-    Some(format!("\x1b]{body}\x1b\\"))
+    is_query.then(|| format!("\x1b]{body}\x1b\\"))
 }
 
 impl Dispatcher {
@@ -682,15 +695,14 @@ impl Dispatcher {
     pub fn osc_dispatch(&mut self, fb: &mut Framebuffer) {
         let osc = &self.osc_string;
 
-        // OSC 52;Pc;Pd -- clipboard. Pd is base64 data, or "?" to query.
-        if osc.len() >= 4
-            && osc[0] == '5'
-            && osc[1] == '2'
-            && osc[2] == ';'
-            && osc[3..].contains(&';')
-        {
-            let clipboard: Vec<char> = osc[3..].to_vec();
-            fb.set_clipboard(clipboard);
+        // OSC 52;c;Pd -- clipboard. Pd is base64 data, or "?" to query.
+        //
+        // The selector is pinned to `c`, as the C++ pins it, and only the payload is
+        // kept. Carrying the sender's own selector would let it reach the primary
+        // selection and the cut buffers as well -- so a middle-click would paste what
+        // the far end chose rather than what the user selected.
+        if osc.len() >= 5 && osc[..5].iter().collect::<String>() == "52;c;" {
+            fb.set_clipboard(osc[5..].to_vec());
             return;
         }
 
@@ -988,8 +1000,47 @@ mod tests {
             d.osc_put(c);
         }
         d.osc_dispatch(&mut fb);
-        assert_eq!(fb.clipboard(), &['c', ';', 'a', 'G', 'k', '=']);
+        // Only the payload is kept; the selector is not the sender's to choose.
+        assert_eq!(fb.clipboard(), &['a', 'G', 'k', '=']);
         assert_eq!(fb.clipboard_seq(), 1);
+    }
+
+    #[test]
+    fn osc_52_refuses_a_selection_other_than_the_clipboard() {
+        // `p` is the primary selection and `0`..`7` are the cut buffers. Honouring them
+        // would let whatever is on the other end decide what a middle-click pastes.
+        for osc in ["52;p;ZXZpbA==", "52;s0;ZXZpbA==", "52;;ZXZpbA=="] {
+            let mut fb = Framebuffer::new(10, 2);
+            let mut d = Dispatcher::new();
+            d.osc_start();
+            for c in osc.chars() {
+                d.osc_put(c);
+            }
+            d.osc_dispatch(&mut fb);
+            assert!(fb.clipboard().is_empty(), "{osc} reached the clipboard");
+        }
+    }
+
+    #[test]
+    fn a_colour_query_may_not_smuggle_an_assignment() {
+        // Both sequences set a colour when given anything but `?`, and both take
+        // repeated fields, so a trailing `?` must not be enough to get a run of
+        // assignments through to the user's own terminal.
+        for osc in [
+            "4;1;rgb:00/00/00;2;?",
+            "11;rgb:ff/00/00;?",
+            "10;#000000;?",
+            "4;1;?;2;rgb:00/00/00",
+        ] {
+            let chars: Vec<char> = osc.chars().collect();
+            assert_eq!(parse_color_query(&chars), None, "{osc} was forwarded");
+        }
+
+        // Genuine queries still go through, or the feature would be gone.
+        for osc in ["4;1;?", "4;1;?;2;?", "11;?", "19;?"] {
+            let chars: Vec<char> = osc.chars().collect();
+            assert!(parse_color_query(&chars).is_some(), "{osc} was refused");
+        }
     }
 
     #[test]

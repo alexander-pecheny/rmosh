@@ -231,7 +231,7 @@ impl Display {
         // Has the clipboard been set or queried? Gated on `initialized` so a client
         // attaching or repainting does not replay a stale copy.
         if initialized && f.clipboard_seq() != last.clipboard_seq() {
-            frame.append("\x1b]52;");
+            frame.append("\x1b]52;c;");
             for &c in f.clipboard() {
                 frame.append_char(c);
             }
