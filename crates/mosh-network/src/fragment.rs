@@ -92,11 +92,23 @@ impl Fragment {
     }
 }
 
+/// Most bytes of fragments we will hold for one instruction.
+///
+/// An instruction has to decompress to less than the compressor's own ceiling to be of
+/// any use, and compression does not meaningfully expand even incompressible input, so
+/// anything past this could never have completed. It caps what a peer can make us hold
+/// regardless of what it numbers its fragments.
+const MAX_ASSEMBLY_BYTES: usize = compressor::BUFFER_SIZE;
+
 /// Collects the fragments of one instruction until it is complete.
+///
+/// Held sparsely, keyed by fragment number. The number is 15 bits and comes off the wire,
+/// so a dense vector would let one datagram claiming fragment 32767 cost an allocation of
+/// 32768 slots -- hundreds of times the size of the datagram that asked for it.
 #[derive(Debug, Default)]
 pub struct FragmentAssembly {
-    fragments: Vec<Option<Fragment>>,
-    fragments_arrived: usize,
+    fragments: std::collections::BTreeMap<u16, Fragment>,
+    bytes_held: usize,
     /// None until the final fragment tells us how many there are.
     fragments_total: Option<usize>,
     current_id: Option<u64>,
@@ -107,59 +119,68 @@ impl FragmentAssembly {
         FragmentAssembly::default()
     }
 
+    fn restart(&mut self, id: u64) {
+        self.fragments.clear();
+        self.bytes_held = 0;
+        self.fragments_total = None;
+        self.current_id = Some(id);
+    }
+
     /// Add a fragment. Returns whether the instruction is now complete.
     pub fn add_fragment(&mut self, frag: Fragment) -> bool {
-        let index = frag.fragment_num as usize;
-
         if self.current_id != Some(frag.id) {
             // A fragment of a different instruction supersedes whatever we were
             // collecting; the old one can never complete now.
-            self.fragments.clear();
-            self.fragments.resize(index + 1, None);
-            self.fragments_arrived = 1;
-            self.fragments_total = None;
-            self.current_id = Some(frag.id);
-            let final_fragment = frag.final_fragment;
-            self.fragments[index] = Some(frag);
-            if final_fragment {
-                self.fragments_total = Some(index + 1);
-                self.fragments.truncate(index + 1);
-            }
-        } else {
-            if self.fragments.len() <= index {
-                self.fragments.resize(index + 1, None);
-            }
-            // A duplicate is ignored rather than asserted on: the network is allowed to
-            // deliver the same datagram twice.
-            if self.fragments[index].is_none() {
-                let final_fragment = frag.final_fragment;
-                self.fragments[index] = Some(frag);
-                self.fragments_arrived += 1;
-                if final_fragment {
-                    self.fragments_total = Some(index + 1);
-                    self.fragments.truncate(index + 1);
-                }
-            }
+            self.restart(frag.id);
         }
 
-        Some(self.fragments_arrived) == self.fragments_total
+        if frag.final_fragment {
+            let total = frag.fragment_num as usize + 1;
+            self.fragments_total = Some(total);
+            // Nothing numbered past the last fragment belongs to this instruction.
+            self.fragments.retain(|&num, held| {
+                let keep = (num as usize) < total;
+                if !keep {
+                    self.bytes_held -= held.contents.len();
+                }
+                keep
+            });
+        }
+
+        if self.bytes_held + frag.contents.len() > MAX_ASSEMBLY_BYTES {
+            self.restart(frag.id);
+            return false;
+        }
+
+        // A duplicate is ignored rather than asserted on: the network is allowed to
+        // deliver the same datagram twice.
+        if let std::collections::btree_map::Entry::Vacant(slot) =
+            self.fragments.entry(frag.fragment_num)
+        {
+            self.bytes_held += frag.contents.len();
+            slot.insert(frag);
+        }
+
+        // Every number below the total is distinct and none reaches it, so holding that
+        // many is the same as holding all of them.
+        Some(self.fragments.len()) == self.fragments_total
     }
 
     /// Reassemble, decompress and parse the completed instruction.
     pub fn get_assembly(&mut self) -> Result<Instruction, FragmentError> {
-        let mut encoded = Vec::new();
-        for frag in &self.fragments {
-            match frag {
-                Some(f) => encoded.extend_from_slice(&f.contents),
-                None => return Err(FragmentError::Malformed),
-            }
+        if Some(self.fragments.len()) != self.fragments_total {
+            return Err(FragmentError::Malformed);
+        }
+        let mut encoded = Vec::with_capacity(self.bytes_held);
+        for frag in self.fragments.values() {
+            encoded.extend_from_slice(&frag.contents);
         }
 
         let plain = compressor::uncompress(&encoded).map_err(|_| FragmentError::Malformed)?;
         let inst = Instruction::decode(&plain[..]).map_err(|_| FragmentError::Malformed)?;
 
         self.fragments.clear();
-        self.fragments_arrived = 0;
+        self.bytes_held = 0;
         self.fragments_total = None;
 
         Ok(inst)
@@ -408,6 +429,41 @@ mod tests {
         // Fragment boundaries move, so the receiver must not mix the two.
         let b = f.make_fragments(&inst, 300).unwrap()[0].id;
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_high_fragment_number_costs_only_what_it_carries() {
+        let mut asm = FragmentAssembly::new();
+        // The number is the peer's to choose anywhere in 15 bits. Reserving a slot for
+        // every number below it would let one small datagram cost thousands of times its
+        // own size, over and over, by naming a fresh instruction each time.
+        for id in 0..1000 {
+            asm.add_fragment(Fragment::new(id, FRAGMENT_NUM_MASK, false, vec![0; 16]));
+        }
+        assert_eq!(asm.fragments.len(), 1);
+        assert_eq!(asm.bytes_held, 16);
+    }
+
+    #[test]
+    fn an_instruction_that_could_never_complete_is_not_hoarded() {
+        let mut asm = FragmentAssembly::new();
+        // No final fragment ever arrives, so nothing here can be assembled. Holding it
+        // all anyway would let a peer park as much memory as it cared to send.
+        for num in 0..500u16 {
+            asm.add_fragment(Fragment::new(7, num, false, vec![0; 100_000]));
+            assert!(asm.bytes_held <= MAX_ASSEMBLY_BYTES);
+        }
+    }
+
+    #[test]
+    fn a_fragment_numbered_past_the_last_one_is_discarded() {
+        let mut asm = FragmentAssembly::new();
+        // Arriving before the final fragment, it cannot yet be known to be surplus.
+        asm.add_fragment(Fragment::new(1, 9, false, b"surplus".to_vec()));
+        asm.add_fragment(Fragment::new(1, 0, false, b"hello ".to_vec()));
+        assert!(asm.add_fragment(Fragment::new(1, 1, true, b"world".to_vec())));
+        assert_eq!(asm.fragments.len(), 2);
+        assert_eq!(asm.bytes_held, b"hello world".len());
     }
 
     #[test]

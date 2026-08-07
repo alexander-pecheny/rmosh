@@ -575,17 +575,13 @@ fn csi_dl(fb: &mut Framebuffer, dispatch: &mut Dispatcher) {
 }
 
 fn csi_ich(fb: &mut Framebuffer, dispatch: &mut Dispatcher) {
-    let cells = dispatch.getparam(0, 1);
-    for _ in 0..cells {
-        fb.insert_cell(fb.ds.cursor_row(), fb.ds.cursor_col());
-    }
+    let cells = dispatch.getparam(0, 1).max(0) as usize;
+    fb.insert_cells(fb.ds.cursor_row(), fb.ds.cursor_col(), cells);
 }
 
 fn csi_dch(fb: &mut Framebuffer, dispatch: &mut Dispatcher) {
-    let cells = dispatch.getparam(0, 1);
-    for _ in 0..cells {
-        fb.delete_cell(fb.ds.cursor_row(), fb.ds.cursor_col());
-    }
+    let cells = dispatch.getparam(0, 1).max(0) as usize;
+    fb.delete_cells(fb.ds.cursor_row(), fb.ds.cursor_col(), cells);
 }
 
 /// Line position absolute.

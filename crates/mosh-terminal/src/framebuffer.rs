@@ -446,14 +446,41 @@ impl Row {
         }
     }
 
+    /// Open `count` blank cells at `col`, pushing the rest of the row off the end.
+    ///
+    /// Done in one shift rather than `count` of them. The count reaches here from a CSI
+    /// parameter, so repeating a whole-row move that many times turns a handful of input
+    /// bytes into an unbounded amount of work.
+    pub fn insert_cells(&mut self, col: usize, count: usize, background_color: ColorType) {
+        let width = self.cells.len();
+        if col >= width {
+            return;
+        }
+        let count = count.min(width - col);
+        self.cells.truncate(width - count);
+        self.cells.splice(
+            col..col,
+            std::iter::repeat_n(Cell::new(background_color), count),
+        );
+    }
+
+    /// Remove `count` cells at `col`, drawing the rest of the row leftwards.
+    pub fn delete_cells(&mut self, col: usize, count: usize, background_color: ColorType) {
+        let width = self.cells.len();
+        if col >= width {
+            return;
+        }
+        let count = count.min(width - col);
+        self.cells.drain(col..col + count);
+        self.cells.resize(width, Cell::new(background_color));
+    }
+
     pub fn insert_cell(&mut self, col: usize, background_color: ColorType) {
-        self.cells.insert(col, Cell::new(background_color));
-        self.cells.pop();
+        self.insert_cells(col, 1, background_color);
     }
 
     pub fn delete_cell(&mut self, col: usize, background_color: ColorType) {
-        self.cells.push(Cell::new(background_color));
-        self.cells.remove(col);
+        self.delete_cells(col, 1, background_color);
     }
 
     pub fn reset(&mut self, background_color: ColorType) {
@@ -1047,14 +1074,22 @@ impl Framebuffer {
             .splice(at..at, std::iter::repeat_n(blank, scroll as usize));
     }
 
-    pub fn insert_cell(&mut self, row: i32, col: i32) {
+    pub fn insert_cells(&mut self, row: i32, col: i32, count: usize) {
         let bg = self.ds.background_rendition();
-        self.mutable_row(row).insert_cell(col as usize, bg);
+        self.mutable_row(row).insert_cells(col as usize, count, bg);
+    }
+
+    pub fn delete_cells(&mut self, row: i32, col: i32, count: usize) {
+        let bg = self.ds.background_rendition();
+        self.mutable_row(row).delete_cells(col as usize, count, bg);
+    }
+
+    pub fn insert_cell(&mut self, row: i32, col: i32) {
+        self.insert_cells(row, col, 1);
     }
 
     pub fn delete_cell(&mut self, row: i32, col: i32) {
-        let bg = self.ds.background_rendition();
-        self.mutable_row(row).delete_cell(col as usize, bg);
+        self.delete_cells(row, col, 1);
     }
 
     pub fn reset(&mut self) {
