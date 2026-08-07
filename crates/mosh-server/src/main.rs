@@ -112,6 +112,9 @@ fn run(args: args::Args) -> std::io::Result<()> {
     // Signals must not kill a detached server.
     pty::ignore_signal(libc_sighup());
     pty::ignore_signal(libc_sigpipe());
+    // A kill is how a stranded session is ended, and it has to leave the login database
+    // as it found it, so it goes through the main loop rather than straight to _exit.
+    pty::catch_termination(libc_sigterm());
 
     // Detach so the ssh session that started us can end.
     if !pty::detach()? {
@@ -249,6 +252,11 @@ fn serve(
     let network_timeout = network_timeout_from_env();
 
     loop {
+        if pty::termination_requested() {
+            eprintln!("mosh-server: Terminated; exiting.");
+            break;
+        }
+
         let now = pty::now_ms();
 
         // Wake for whichever comes first: the transport's own schedule or new input.
@@ -481,4 +489,8 @@ fn libc_sighup() -> i32 {
 
 fn libc_sigpipe() -> i32 {
     13
+}
+
+fn libc_sigterm() -> i32 {
+    15
 }

@@ -265,6 +265,33 @@ pub fn reset_signal(sig: libc::c_int) {
     }
 }
 
+static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn note_termination(_sig: libc::c_int) {
+    TERMINATED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Turn a signal into a flag the caller can read, so a kill ends the session in order
+/// rather than stopping the process where it stands, leaving its login record behind.
+///
+/// Deliberately without `SA_RESTART`: the interrupted poll is how the loop finds out.
+pub fn catch_termination(sig: libc::c_int) {
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe, and sa
+    // points at a live local for the duration of the call.
+    unsafe {
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        let handler: extern "C" fn(libc::c_int) = note_termination;
+        sa.sa_sigaction = handler as libc::sighandler_t;
+        libc::sigemptyset(&mut sa.sa_mask);
+        libc::sigaction(sig, &sa, std::ptr::null_mut());
+    }
+}
+
+/// True once a signal handed to [`catch_termination`] has arrived.
+pub fn termination_requested() -> bool {
+    TERMINATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Reap a child if it has exited. Returns its exit status when it has.
 pub fn try_wait(child: libc::pid_t) -> Option<i32> {
     let mut status: libc::c_int = 0;
