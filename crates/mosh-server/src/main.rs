@@ -129,6 +129,10 @@ fn run(args: args::Args) -> std::io::Result<()> {
     transport.verbose = args.verbose;
     transport.sender.verbose = args.verbose;
 
+    // What `who` will show for this session, and what another server looks for when it
+    // reports detached sessions. Read by both sides of the fork, so it is built first.
+    let utmp_entry = format!("mosh [{}]", std::process::id());
+
     // Allocate the pty and start the child.
     let (master, child) = match pty::forkpty(rows, cols)? {
         pty::ForkPty::Child => {
@@ -137,6 +141,10 @@ fn run(args: args::Args) -> std::io::Result<()> {
             // a session where no pipe closing and no hangup is ever noticed.
             pty::reset_signal(libc_sighup());
             pty::reset_signal(libc_sigpipe());
+
+            // On the pty, so it reaches the user's screen, and before exec, so the shell
+            // does not scroll it away.
+            warn_unattached(&utmp_entry);
 
             let (program, argv) = child_command(&args);
             let env = child_env(&args);
@@ -148,7 +156,67 @@ fn run(args: args::Args) -> std::io::Result<()> {
         pty::ForkPty::Parent { master, child } => (master, child),
     };
 
-    serve(&mut transport, master, child, args.verbose)
+    serve(&mut transport, master, child, args.verbose, &utmp_entry)
+}
+
+/// The pty master, with the session's login record tied to its lifetime.
+///
+/// Removing the record has to name the pty, so it only works while the descriptor is
+/// still open. Owning the descriptor here makes that ordering structural rather than a
+/// rule to remember: a type's own `Drop` runs before its fields are dropped. It also
+/// means a record is not left behind on a panic, where `who` would go on listing a
+/// session that had ended.
+struct PtyMaster {
+    file: std::fs::File,
+    fd: std::os::fd::RawFd,
+}
+
+impl PtyMaster {
+    fn new(master_fd: std::os::fd::OwnedFd, utmp_entry: &str) -> Self {
+        let fd = master_fd.as_raw_fd();
+        // Does nothing where libutempter is absent, as the C++ does when built without it.
+        mosh_sys::utmp::add_record(fd, utmp_entry);
+        PtyMaster {
+            file: std::fs::File::from(master_fd),
+            fd,
+        }
+    }
+}
+
+impl Drop for PtyMaster {
+    fn drop(&mut self) {
+        mosh_sys::utmp::remove_record(self.fd);
+    }
+}
+
+/// Tell the user about sessions they have left running here.
+///
+/// Suppressed by a `.hushlogin`, which is how the C++ decides the same question.
+fn warn_unattached(ignore: &str) {
+    if let Some(home) = std::env::var_os("HOME") {
+        if std::path::Path::new(&home).join(".hushlogin").exists() {
+            return;
+        }
+    }
+
+    let detached = mosh_sys::utmp::detached_sessions(ignore);
+    match detached.len() {
+        0 => {}
+        1 => print!(
+            "\x1b[37;44mMosh: You have a detached Mosh session on this server ({}).\x1b[m\n\n",
+            detached[0]
+        ),
+        n => {
+            let list: String = detached
+                .iter()
+                .map(|s| format!("        - {s}\n"))
+                .collect();
+            print!(
+                "\x1b[37;44mMosh: You have {n} detached Mosh sessions on this server, with PIDs:\n{list}\x1b[m\n"
+            );
+        }
+    }
+    let _ = std::io::stdout().flush();
 }
 
 fn serve(
@@ -156,12 +224,15 @@ fn serve(
     master_fd: std::os::fd::OwnedFd,
     child: i32,
     verbose: u32,
+    utmp_entry: &str,
 ) -> std::io::Result<()> {
     let master = master_fd.as_raw_fd();
     // A ^S arriving between the poll and the read can otherwise leave read() blocking
     // even though poll reported data, wedging everything attached to the pty.
     let _ = pty::set_nonblocking(master);
-    let mut host = std::fs::File::from(master_fd);
+    // Registers the session in the login database so `who` lists it, and removes it
+    // again when this goes out of scope.
+    let mut host = PtyMaster::new(master_fd, utmp_entry);
     // Output the pty could not accept yet, retried on later passes rather than blocking.
     let mut pending_to_host: Vec<u8> = Vec::new();
     let mut last_remote_num = transport.remote_state_num();
@@ -260,7 +331,7 @@ fn serve(
             && !transport.sender.shutdown_in_progress()
             && ready.iter().any(|&i| i >= network_count)
         {
-            match host.read(&mut buf) {
+            match host.file.read(&mut buf) {
                 Ok(0) => child_exit = Some(0),
                 Ok(n) => {
                     drained_this_pass = true;
@@ -281,7 +352,7 @@ fn serve(
         // stopped by a ^S while still owing us output, so we must stay able to read.
         pending_to_host.extend_from_slice(&terminal_to_host);
         if !pending_to_host.is_empty() && child_exit.is_none() {
-            match host.write(&pending_to_host) {
+            match host.file.write(&pending_to_host) {
                 Ok(n) => {
                     pending_to_host.drain(..n);
                 }
