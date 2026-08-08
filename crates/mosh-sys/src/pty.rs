@@ -266,30 +266,48 @@ pub fn reset_signal(sig: libc::c_int) {
 }
 
 static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static RESIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 extern "C" fn note_termination(_sig: libc::c_int) {
     TERMINATED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Turn a signal into a flag the caller can read, so a kill ends the session in order
-/// rather than stopping the process where it stands, leaving its login record behind.
-///
+extern "C" fn note_resize(_sig: libc::c_int) {
+    RESIZED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Deliberately without `SA_RESTART`: the interrupted poll is how the loop finds out.
-pub fn catch_termination(sig: libc::c_int) {
-    // SAFETY: the handler only stores to an atomic, which is async-signal-safe, and sa
+fn catch(sig: libc::c_int, handler: extern "C" fn(libc::c_int)) {
+    // SAFETY: the handlers only store to an atomic, which is async-signal-safe, and sa
     // points at a live local for the duration of the call.
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
-        let handler: extern "C" fn(libc::c_int) = note_termination;
         sa.sa_sigaction = handler as libc::sighandler_t;
         libc::sigemptyset(&mut sa.sa_mask);
         libc::sigaction(sig, &sa, std::ptr::null_mut());
     }
 }
 
+/// Turn a signal into a flag the caller can read, so a kill ends the session in order
+/// rather than stopping the process where it stands, leaving its login record behind.
+pub fn catch_termination(sig: libc::c_int) {
+    catch(sig, note_termination);
+}
+
 /// True once a signal handed to [`catch_termination`] has arrived.
 pub fn termination_requested() -> bool {
     TERMINATED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Turn `SIGWINCH` into a flag, so the client can tell the server the terminal's new
+/// size. Without it the far end keeps drawing to the size the session started at.
+pub fn catch_window_change() {
+    catch(libc::SIGWINCH, note_resize);
+}
+
+/// True once for each batch of window changes; reading clears the flag.
+pub fn window_changed() -> bool {
+    RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Reap a child if it has exited. Returns its exit status when it has.
@@ -421,6 +439,21 @@ mod tests {
         // window size to 0x0, which resized the real terminal and made a peer assert on
         // a zero-height screen. Querying must never modify anything.
         assert!(!isatty(-1));
+    }
+
+    #[test]
+    fn a_window_change_raises_the_flag_once() {
+        catch_window_change();
+        assert!(!window_changed());
+        // SAFETY: raise takes a signal number and nothing else.
+        unsafe {
+            libc::raise(libc::SIGWINCH);
+        }
+        assert!(window_changed());
+        assert!(
+            !window_changed(),
+            "the flag outlived the resize it stood for"
+        );
     }
 
     #[test]

@@ -137,8 +137,12 @@ fn session(
     // Keystrokes should leave as soon as possible; batching them adds visible latency.
     transport.sender.set_send_delay(1);
 
-    // Tell the server how big our terminal is before anything else.
+    // Tell the server how big our terminal is before anything else, and arrange to keep
+    // telling it. A terminal reflows its own screen when it is resized, so a client that
+    // slept through the change goes on painting differences against a screen that has
+    // moved underneath it, and the leftovers never wash out.
     transport.sender.current_state_mut().push_resize(cols, rows);
+    pty::catch_window_change();
 
     let mut predictions = PredictionEngine::new();
     predictions.set_display_preference(predict);
@@ -209,6 +213,19 @@ fn session(
                         std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
                     ) => {}
                 Err(_) => break,
+            }
+        }
+
+        if pty::window_changed() {
+            if let Ok((rows, cols)) = pty::window_size(stdin_fd) {
+                if !transport.sender.shutdown_in_progress() {
+                    transport
+                        .sender
+                        .current_state_mut()
+                        .push_resize(cols.max(1) as i32, rows.max(1) as i32);
+                }
+                // Every guess was placed against the old geometry.
+                predictions.reset();
             }
         }
 
