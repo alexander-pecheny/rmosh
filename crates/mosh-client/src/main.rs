@@ -143,6 +143,7 @@ fn session(
     // moved underneath it, and the leftovers never wash out.
     transport.sender.current_state_mut().push_resize(cols, rows);
     pty::catch_window_change();
+    pty::catch_continue();
 
     let mut predictions = PredictionEngine::new();
     predictions.set_display_preference(predict);
@@ -234,6 +235,14 @@ fn session(
                 // Every guess was placed against the old geometry.
                 predictions.reset();
             }
+        }
+
+        // Coming back from a stop, the terminal is as whoever held it meanwhile left it:
+        // cooked, and showing their screen rather than ours.
+        if pty::continued() {
+            pty::set_raw(stdin_fd)?;
+            out.write_all(display.open().as_bytes())?;
+            repaint_requested = true;
         }
 
         // Draw: the server's screen, with our guesses laid over it.

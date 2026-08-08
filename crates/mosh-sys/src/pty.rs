@@ -267,6 +267,7 @@ pub fn reset_signal(sig: libc::c_int) {
 
 static TERMINATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static RESIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CONTINUED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 extern "C" fn note_termination(_sig: libc::c_int) {
     TERMINATED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -274,6 +275,10 @@ extern "C" fn note_termination(_sig: libc::c_int) {
 
 extern "C" fn note_resize(_sig: libc::c_int) {
     RESIZED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+extern "C" fn note_continue(_sig: libc::c_int) {
+    CONTINUED.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Deliberately without `SA_RESTART`: the interrupted poll is how the loop finds out.
@@ -308,6 +313,17 @@ pub fn catch_window_change() {
 /// True once for each batch of window changes; reading clears the flag.
 pub fn window_changed() -> bool {
     RESIZED.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Turn `SIGCONT` into a flag. Whoever stopped the client had the terminal to itself
+/// while it was away, and gave back neither the modes nor the screen it was left.
+pub fn catch_continue() {
+    catch(libc::SIGCONT, note_continue);
+}
+
+/// True once for each time the process was continued; reading clears the flag.
+pub fn continued() -> bool {
+    CONTINUED.swap(false, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Reap a child if it has exited. Returns its exit status when it has.
@@ -454,6 +470,19 @@ mod tests {
             !window_changed(),
             "the flag outlived the resize it stood for"
         );
+    }
+
+    #[test]
+    fn being_continued_raises_the_flag_once() {
+        catch_continue();
+        assert!(!continued());
+        // SAFETY: raise takes a signal number and nothing else. SIGCONT to a process
+        // that was never stopped does nothing beyond running the handler.
+        unsafe {
+            libc::raise(libc::SIGCONT);
+        }
+        assert!(continued());
+        assert!(!continued(), "the flag outlived the stop it stood for");
     }
 
     #[test]
