@@ -151,6 +151,7 @@ fn session(
     let mut buf = [0u8; 16384];
     let mut stdin = std::io::stdin();
     let mut quit_sequence_started = false;
+    let mut repaint_requested = false;
 
     loop {
         let now = pty::now_ms();
@@ -200,6 +201,12 @@ fn session(
                             continue;
                         }
 
+                        // Ctrl-L reaches the application as usual, and also repaints,
+                        // which is the user's way out of a screen that went wrong.
+                        if b == 0x0c {
+                            repaint_requested = true;
+                        }
+
                         if !transport.sender.shutdown_in_progress() {
                             predictions.new_user_byte(b, &local_framebuffer, now);
                             transport.sender.current_state_mut().push_byte(b);
@@ -234,11 +241,12 @@ fn session(
         predictions.cull(&new_state, now);
         predictions.apply(&mut new_state);
 
-        let diff = display.new_frame(true, &local_framebuffer, &new_state);
+        let diff = display.new_frame(!repaint_requested, &local_framebuffer, &new_state);
         if !diff.is_empty() {
             out.write_all(diff.as_bytes())?;
             out.flush()?;
         }
+        repaint_requested = false;
         local_framebuffer = new_state;
 
         // The server signals it is leaving by moving to the shutdown state number. The
