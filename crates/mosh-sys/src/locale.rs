@@ -5,8 +5,15 @@
 //! agree exactly; a Rust reimplementation disagrees with glibc on 95 character widths
 //! and on whether 814,732 codepoints are printable at all. See ADR 0002.
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
+#[cfg(not(target_os = "ios"))]
+use std::ffi::CStr;
 
+mod ios;
+#[cfg(target_os = "ios")]
+pub use ios::*;
+
+#[cfg(not(target_os = "ios"))]
 // The libc crate does not re-export the locale-dependent character functions, so we
 // declare them here. Signatures follow POSIX.
 mod sys {
@@ -29,9 +36,11 @@ mod sys {
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Upper bound on the bytes one character can encode to, from <limits.h>.
 const MB_LEN_MAX: usize = 16;
 
+#[cfg(not(target_os = "ios"))]
 /// Adopt the user's locale for every category, as `set_native_locale()` does in C++.
 pub fn set_native_locale() {
     // SAFETY: LC_ALL is a valid category and "" is a valid NUL-terminated string.
@@ -41,6 +50,7 @@ pub fn set_native_locale() {
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Adopt a named locale, for a process with no environment to read one from.
 /// Returns false when the platform does not have it.
 pub fn set_locale(name: &str) -> bool {
@@ -52,6 +62,7 @@ pub fn set_locale(name: &str) -> bool {
     !unsafe { libc::setlocale(libc::LC_ALL, name.as_ptr()) }.is_null()
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Force the C locale, as `set_posix_locale()` does in C++.
 pub fn set_posix_locale() {
     // SAFETY: as above; "C" is a valid locale name.
@@ -60,6 +71,7 @@ pub fn set_posix_locale() {
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 /// The current locale's codeset name, e.g. `UTF-8`.
 pub fn codeset() -> String {
     // SAFETY: CODESET is a valid nl_item. nl_langinfo returns a pointer to static
@@ -81,6 +93,7 @@ pub fn is_utf8_locale() -> bool {
     cs.eq_ignore_ascii_case("UTF-8") || cs.eq_ignore_ascii_case("UTF8")
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Columns a character occupies: `None` if it is not printable, otherwise 0, 1 or 2.
 ///
 /// 0 means the character combines into the preceding cell rather than claiming one.
@@ -109,6 +122,7 @@ pub enum Decoded {
     Invalid,
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Incremental multibyte decoder holding the C library's conversion state.
 ///
 /// Wraps `mbstate_t` so that sequences split across reads decode correctly, which is
@@ -117,12 +131,14 @@ pub struct MbDecoder {
     state: sys::MbState,
 }
 
+#[cfg(not(target_os = "ios"))]
 impl Default for MbDecoder {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 impl MbDecoder {
     pub fn new() -> Self {
         // SAFETY: an all-zero mbstate_t is the documented initial conversion state.
@@ -167,6 +183,7 @@ impl MbDecoder {
     }
 }
 
+#[cfg(not(target_os = "ios"))]
 /// Encode a character into the locale's multibyte form, appending to `out`.
 ///
 /// Mirrors `Cell::append_to_str`, including its ASCII fast path.

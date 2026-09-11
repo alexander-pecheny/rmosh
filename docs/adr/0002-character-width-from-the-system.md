@@ -54,3 +54,11 @@ constraint rather than a new requirement.
 This is a deliberate vote for compatibility over standards-correctness. If interop with
 C++ endpoints is ever dropped as a requirement, `unicode-width` becomes the better choice
 and this decision should be revisited.
+
+## Exception: iOS
+
+iOS ships no locale data, so its C library never leaves the "C" locale: `wcwidth` and
+`mbrtowc` reject every byte above ASCII and the Client would drop all non-ASCII text.
+On that platform alone (`crates/mosh-sys/src/locale/ios.rs`) text is decoded as UTF-8
+in Rust and widths come from the `unicode-width` crate, accepting the disagreements
+listed above. Added 2026-09-12 for Sesh.

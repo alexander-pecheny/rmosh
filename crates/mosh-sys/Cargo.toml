@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 libc.workspace = true
+# Only iOS uses it (see locale/ios.rs); unconditional so the host can run its tests.
+unicode-width = "0.2"
 
 [features]
 # Enabled when libutempter is available, matching --with-utempter in configure.ac.
