@@ -5,12 +5,12 @@
 
 #![forbid(unsafe_code)]
 
-mod opts;
-
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
-use opts::{shell_quote, Opts};
+use mosh::handshake::Handshake;
+use mosh::launch::{announce_prefix, locale_from_env, server_command, strip_user};
+use mosh::opts::{self, shell_quote, Opts};
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
@@ -143,70 +143,12 @@ fn pump(from: &mut impl std::io::Read, to: &mut impl std::io::Write) -> std::io:
     }
 }
 
-/// The arguments the far end's mosh-server should receive.
-fn server_args(o: &Opts) -> Vec<String> {
-    let mut server: Vec<String> = vec!["new".into()];
-
-    server.push("-c".into());
-    server.push(colors().to_string());
-
-    // How the server should choose the address it replies from.
-    match o.bind_ip.as_deref() {
-        None | Some("ssh") => {
-            if o.localhost {
-                server.push("-i".into());
-                server.push(o.userhost.clone().unwrap_or_default());
-            } else {
-                server.push("-s".into());
-            }
-        }
-        Some("any") => {}
-        Some(ip) => {
-            server.push("-i".into());
-            server.push(ip.to_string());
-        }
-    }
-
-    if let Some(p) = &o.port_request {
-        server.push("-p".into());
-        server.push(p.clone());
-    }
-
-    // Carry the locale across, since both ends must agree on character widths.
-    for var in ["LANG", "LANGUAGE", "LC_CTYPE", "LC_ALL"] {
-        if let Ok(v) = std::env::var(var) {
-            server.push("-l".into());
-            server.push(format!("{var}={v}"));
-        }
-    }
-
-    if !o.command.is_empty() {
-        server.push("--".into());
-        server.extend(o.command.iter().cloned());
-    }
-
-    server
-}
-
-fn colors() -> u32 {
-    // Mirrors the Perl: ask the terminal, and fall back to a safe 8.
-    match std::env::var("TERM").as_deref() {
-        Ok(t) if t.contains("256color") => 256,
-        _ => 8,
-    }
-}
-
-/// Asks the far end to announce the address ssh reached it on, under `--experimental-
-/// remote-ip=remote`. The user's shell may not be Posix, so sh is named explicitly.
-const ANNOUNCE_SSH_CONNECTION: &str =
-    r#"[ -n "$SSH_CONNECTION" ] && printf "\nMOSH SSH_CONNECTION %s\n" "$SSH_CONNECTION""#;
-
 fn run(o: Opts) -> std::io::Result<()> {
     let mut userhost = o.userhost.clone().unwrap_or_default();
+    let mut found = Handshake::default();
 
     // Under 'local' the address is resolved here, before the fork, so that ssh and the
     // client are given the same one.
-    let mut ip = None;
     if o.remote_ip == "local" {
         let host = strip_user(&userhost);
         let user = &userhost[..userhost.len() - host.len()];
@@ -214,26 +156,18 @@ fn run(o: Opts) -> std::io::Result<()> {
             .into_iter()
             .next()
             .ok_or_else(|| std::io::Error::other(format!("could not find address for {host}")))?;
-        ip = Some(addr.ip().to_string());
+        found.ip = Some(addr.ip().to_string());
         userhost = format!("{user}{}", addr.ip());
     }
 
-    let server_command = format!(
-        "{} {}",
-        o.server,
-        server_args(&o)
-            .iter()
-            .map(|a| shell_quote(a))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
+    let server_command = server_command(&o, &locale_from_env());
 
     let mut reader = None;
     let mut child = if o.localhost {
         // --local runs the server here instead of over ssh, which is what the test
         // suite uses so it needs no working ssh to localhost. Nothing resolves an
         // address in that case, so the host stands in for one.
-        ip = Some(userhost.clone());
+        found.ip = Some(userhost.clone());
         Command::new("sh")
             .arg("-c")
             .arg(&server_command)
@@ -273,9 +207,7 @@ fn run(o: Opts) -> std::io::Result<()> {
                     .arg("-o")
                     .arg(format!("ProxyCommand={proxy}"));
             }
-            "remote" => {
-                announce = format!("sh -c {} ; ", shell_quote(ANNOUNCE_SSH_CONNECTION));
-            }
+            "remote" => announce = announce_prefix(),
             _ => {}
         }
 
@@ -287,94 +219,52 @@ fn run(o: Opts) -> std::io::Result<()> {
         child
     };
 
-    // Read the handshake. Anything else on the way is the remote shell talking, and is
-    // passed through so the user sees it.
     let stdout: Box<dyn std::io::Read> = match reader {
         Some(f) => Box::new(f),
         None => Box::new(child.stdout.take().expect("piped")),
     };
-    let mut port = None;
-    let mut key = None;
-    let mut sship = None;
 
     // Read bytes, not text. Everything before the handshake is the remote shell talking,
     // and a login banner in any encoding but UTF-8 would otherwise end the connection
     // before the handshake was ever reached. The Perl reads bytes for the same reason.
     let mut stdout = BufReader::new(stdout);
-    loop {
+    while !found.complete() {
         let mut raw = Vec::new();
         if stdout.read_until(b'\n', &mut raw)? == 0 {
             break;
         }
         let line = String::from_utf8_lossy(&raw);
         let line = line.trim_end_matches('\n').trim_end_matches('\r');
-        if let Some(rest) = line.strip_prefix("MOSH IP ") {
-            if ip.is_some() {
-                return Err(std::io::Error::other(
-                    "detected attempt to redefine MOSH IP",
-                ));
-            }
-            ip = Some(rest.trim().to_string());
-        } else if let Some(rest) = line.strip_prefix("MOSH SSH_CONNECTION ") {
-            // $SSH_CONNECTION is "client_ip client_port server_ip server_port".
-            let words: Vec<&str> = rest.split_whitespace().collect();
-            let Some(server_ip) = words.get(2).filter(|_| words.len() == 4) else {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Bad MOSH SSH_CONNECTION string: {line}"),
-                ));
-            };
-            sship = Some(server_ip.to_string());
-        } else if let Some(rest) = line.strip_prefix("MOSH CONNECT ") {
-            // Both halves are checked for shape before they go anywhere. They arrive
-            // from the far end of an ssh session, and the port becomes an argument to
-            // the client, where a value beginning with '-' would read as an option.
-            let mut parts = rest.split_whitespace();
-            match (parts.next(), parts.next(), parts.next()) {
-                (Some(p), Some(k), None)
-                    if p.parse::<u16>().is_ok()
-                        && k.len() == 22
-                        && k.bytes()
-                            .all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/') =>
-                {
-                    port = Some(p.to_string());
-                    key = Some(k.to_string());
-                    break;
-                }
-                _ => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Bad MOSH CONNECT string: {line}"),
-                    ))
-                }
-            }
-        } else {
-            println!("{line}");
+        match found.line(line) {
+            Ok(Some(text)) => println!("{text}"),
+            Ok(None) => {}
+            Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
         }
     }
 
     let _ = child.wait();
 
-    let (Some(port), Some(key)) = (port, key) else {
+    let Some((port, key)) = found.connect.clone() else {
         return Err(std::io::Error::other(
             "Did not find mosh server startup message.",
         ));
     };
-
-    let target = match (ip, sship) {
-        (Some(ip), _) => ip,
-        (None, Some(sship)) => {
-            eprintln!(
-                "mosh: Using remote IP address {sship} from $SSH_CONNECTION for hostname {userhost}"
-            );
-            sship
+    if found.ip.is_none() {
+        match found.ssh_connection_ip.as_deref() {
+            Some(ip) => eprintln!(
+                "mosh: Using remote IP address {ip} from $SSH_CONNECTION for hostname {userhost}"
+            ),
+            None => {
+                return Err(std::io::Error::other(
+                    "Did not find remote IP address (is SSH ProxyCommand disabled?).",
+                ))
+            }
         }
-        (None, None) => {
-            return Err(std::io::Error::other(
-                "Did not find remote IP address (is SSH ProxyCommand disabled?).",
-            ))
-        }
-    };
+    }
+    let target = found
+        .target()
+        .expect("a target, checked just above")
+        .to_string();
 
     // The key goes across in the environment rather than on the command line, so it
     // never appears in the process table.
@@ -387,82 +277,15 @@ fn run(o: Opts) -> std::io::Result<()> {
     if !o.term_init {
         client.env("MOSH_NO_TERM_INIT", "1");
     }
-    client.arg(&target).arg(&port);
+    client.arg(&target).arg(port.to_string());
 
     let status = client.status()?;
     std::process::exit(status.code().unwrap_or(1));
 }
 
-/// Drop any `user@` prefix; the client connects to the host itself.
-fn strip_user(userhost: &str) -> &str {
-    userhost
-        .rsplit_once('@')
-        .map(|(_, h)| h)
-        .unwrap_or(userhost)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use opts::Predict;
-
-    fn opts_with(f: impl FnOnce(&mut Opts)) -> Opts {
-        let mut o = Opts {
-            userhost: Some("host".into()),
-            ..Default::default()
-        };
-        f(&mut o);
-        o
-    }
-
-    #[test]
-    fn the_server_is_told_to_bind_where_ssh_arrived() {
-        let a = server_args(&opts_with(|_| {}));
-        assert!(a.contains(&"-s".to_string()), "{a:?}");
-    }
-
-    #[test]
-    fn a_local_run_binds_the_host_it_was_given() {
-        let a = server_args(&opts_with(|o| o.localhost = true));
-        let i = a.iter().position(|x| x == "-i").expect("no -i");
-        assert_eq!(a[i + 1], "host");
-    }
-
-    #[test]
-    fn an_explicit_bind_address_wins() {
-        let a = server_args(&opts_with(|o| o.bind_ip = Some("10.0.0.1".into())));
-        let i = a.iter().position(|x| x == "-i").expect("no -i");
-        assert_eq!(a[i + 1], "10.0.0.1");
-    }
-
-    #[test]
-    fn binding_to_any_passes_no_address_at_all() {
-        let a = server_args(&opts_with(|o| o.bind_ip = Some("any".into())));
-        assert!(!a.contains(&"-i".to_string()), "{a:?}");
-        assert!(!a.contains(&"-s".to_string()), "{a:?}");
-    }
-
-    #[test]
-    fn a_command_is_passed_after_a_double_dash() {
-        let a = server_args(&opts_with(|o| o.command = vec!["ls".into(), "-l".into()]));
-        let i = a.iter().position(|x| x == "--").expect("no --");
-        assert_eq!(&a[i + 1..], &["ls".to_string(), "-l".to_string()]);
-    }
-
-    #[test]
-    fn the_port_request_is_forwarded() {
-        let a = server_args(&opts_with(|o| o.port_request = Some("60000:60010".into())));
-        let i = a.iter().position(|x| x == "-p").expect("no -p");
-        assert_eq!(a[i + 1], "60000:60010");
-    }
-
-    #[test]
-    fn a_user_prefix_is_dropped_before_connecting() {
-        // ssh needs user@host; the client needs only the host.
-        assert_eq!(strip_user("alice@example.com"), "example.com");
-        assert_eq!(strip_user("example.com"), "example.com");
-        assert_eq!(strip_user("alice@bob@example.com"), "example.com");
-    }
+    use mosh::opts::Predict;
 
     #[test]
     fn prediction_mode_names_survive_the_round_trip() {

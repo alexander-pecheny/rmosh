@@ -4,3 +4,6 @@
 
 pub mod overlay;
 pub mod prediction;
+pub mod session;
+
+pub use session::{Event, Handle, Options, Session};

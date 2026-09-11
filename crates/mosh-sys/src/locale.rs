@@ -41,6 +41,17 @@ pub fn set_native_locale() {
     }
 }
 
+/// Adopt a named locale, for a process with no environment to read one from.
+/// Returns false when the platform does not have it.
+pub fn set_locale(name: &str) -> bool {
+    let Ok(name) = CString::new(name) else {
+        return false;
+    };
+    // SAFETY: LC_ALL is a valid category and name is a NUL-terminated string alive
+    // across the call. setlocale returns static storage that we do not retain.
+    !unsafe { libc::setlocale(libc::LC_ALL, name.as_ptr()) }.is_null()
+}
+
 /// Force the C locale, as `set_posix_locale()` does in C++.
 pub fn set_posix_locale() {
     // SAFETY: as above; "C" is a valid locale name.

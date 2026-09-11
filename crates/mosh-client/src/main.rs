@@ -1,19 +1,16 @@
 //! The mosh client: renders the server's screen and predicts what it will echo.
 //!
-//! Transliterated from `mosh-client.cc` and `stmclient.cc`.
+//! Transliterated from `mosh-client.cc` and `stmclient.cc`. The session itself lives in
+//! the library; this is the part that owns a real terminal.
 
 #![forbid(unsafe_code)]
 
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 
-use mosh_client::prediction::{DisplayPreference, PredictionEngine};
-use mosh_network::connection::Connection;
-use mosh_network::transport::Transport;
-use mosh_state::{Complete, UserStream};
+use mosh_client::prediction::DisplayPreference;
+use mosh_client::session::{Event, Handle, Options, Session};
 use mosh_sys::pty;
-use mosh_terminal::display::Display;
-use mosh_terminal::framebuffer::Framebuffer;
 
 const USAGE: &str = "Usage: mosh-client [-# ARGS] IP PORT";
 
@@ -111,171 +108,97 @@ fn session(
     port: u16,
     predict: DisplayPreference,
     predict_overwrite: bool,
-    stdin_fd: std::os::fd::RawFd,
+    stdin_fd: RawFd,
 ) -> std::io::Result<()> {
     let (rows, cols) = pty::window_size(stdin_fd).unwrap_or((24, 80));
-    let (rows, cols) = (rows.max(1) as i32, cols.max(1) as i32);
+    let session = Session::new(
+        key,
+        ip,
+        port,
+        Options {
+            cols: cols.max(1) as i32,
+            rows: rows.max(1) as i32,
+            predict,
+            predict_overwrite,
+            terminfo: true,
+        },
+    )?;
 
-    let display = Display::new(true).map_err(std::io::Error::other)?;
-    let mut out = std::io::stdout();
-
-    let mut local_framebuffer = Framebuffer::new(cols, rows);
-    // Paint the initial screen, so what we diff against is what the terminal shows.
-    out.write_all(display.open().as_bytes())?;
-    let init = display.new_frame(false, &local_framebuffer, &local_framebuffer);
-    out.write_all(init.as_bytes())?;
-    out.flush()?;
-
-    let now = pty::now_ms();
-    let connection = Connection::new_client(key, ip, port, now)?;
-    let mut transport = Transport::new(
-        connection,
-        UserStream::new(),
-        Complete::new(cols, rows),
-        now,
-    );
-    // Keystrokes should leave as soon as possible; batching them adds visible latency.
-    transport.sender.set_send_delay(1);
-
-    // Tell the server how big our terminal is before anything else, and arrange to keep
-    // telling it. A terminal reflows its own screen when it is resized, so a client that
-    // slept through the change goes on painting differences against a screen that has
-    // moved underneath it, and the leftovers never wash out.
-    transport.sender.current_state_mut().push_resize(cols, rows);
     pty::catch_window_change();
     pty::catch_continue();
+    let handle = session.handle();
+    std::thread::spawn(move || keyboard(stdin_fd, handle));
 
-    let mut predictions = PredictionEngine::new();
-    predictions.set_display_preference(predict);
-    predictions.set_predict_overwrite(predict_overwrite);
+    let mut out = std::io::stdout();
+    session.run(|bytes| {
+        out.write_all(bytes)?;
+        out.flush()
+    })
+}
 
-    let mut buf = [0u8; 16384];
+/// Turn what is typed, and what the signals say, into Events for the session.
+fn keyboard(stdin_fd: RawFd, handle: Handle) {
     let mut stdin = std::io::stdin();
+    let mut buf = [0u8; 16384];
     let mut quit_sequence_started = false;
-    let mut repaint_requested = false;
 
     loop {
-        let now = pty::now_ms();
-        let wait = transport
-            .wait_time(now)
-            .min(predictions.wait_time())
-            .min(100) as i32;
+        // A signal wakes whichever thread it is delivered to, which may be the session's,
+        // so this one wakes on its own account too and reads the flags every time round.
+        let Ok(ready) = pty::poll_readable(&[stdin_fd], 100) else {
+            return handle.send(Event::Eof);
+        };
 
-        let mut fds: Vec<std::os::fd::RawFd> = transport
-            .connection
-            .sockets()
-            .iter()
-            .map(|s| s.as_raw_fd())
-            .collect();
-        let network_count = fds.len();
-        fds.push(stdin_fd);
-
-        let ready = pty::poll_readable(&fds, wait.max(0))?;
-        let now = pty::now_ms();
-
-        if ready.iter().any(|&i| i < network_count) {
-            while let Some(result) = transport.recv(now) {
-                let _ = result;
-            }
-            // Tell the prediction engine what the server has confirmed, which is what
-            // lets it retire guesses and judge whether it is guessing well.
-            predictions.set_local_frame_acked(transport.sender.sent_state_acked());
-            predictions.set_local_frame_late_acked(transport.get_latest_remote_state().echo_ack());
-            predictions
-                .set_send_interval(transport.sender.send_interval(transport.connection.srtt()));
-        }
-
-        if ready.iter().any(|&i| i >= network_count) {
+        if !ready.is_empty() {
             match stdin.read(&mut buf) {
-                Ok(0) => break,
+                Ok(0) => return handle.send(Event::Eof),
                 Ok(n) => {
+                    let (mut typed, mut repaint) = (Vec::new(), false);
                     for &b in &buf[..n] {
                         // Ctrl-^ then '.' quits, matching the C++ default escape.
                         if quit_sequence_started {
                             quit_sequence_started = false;
                             if b == b'.' {
-                                transport.sender.start_shutdown(now);
+                                handle.send(Event::Bytes(std::mem::take(&mut typed)));
+                                handle.send(Event::Quit);
                                 continue;
                             }
                         } else if b == 0x1e {
                             quit_sequence_started = true;
                             continue;
                         }
-
                         // Ctrl-L reaches the application as usual, and also repaints,
                         // which is the user's way out of a screen that went wrong.
-                        if b == 0x0c {
-                            repaint_requested = true;
-                        }
-
-                        if !transport.sender.shutdown_in_progress() {
-                            predictions.new_user_byte(b, &local_framebuffer, now);
-                            transport.sender.current_state_mut().push_byte(b);
-                        }
+                        repaint |= b == 0x0c;
+                        typed.push(b);
                     }
-                    predictions.set_local_frame_sent(transport.sender.sent_state_last());
+                    if !typed.is_empty() {
+                        handle.send(Event::Bytes(typed));
+                    }
+                    if repaint {
+                        handle.send(Event::Repaint);
+                    }
                 }
                 Err(ref e)
                     if matches!(
                         e.kind(),
                         std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
                     ) => {}
-                Err(_) => break,
+                Err(_) => return handle.send(Event::Eof),
             }
         }
 
         if pty::window_changed() {
             if let Ok((rows, cols)) = pty::window_size(stdin_fd) {
-                if !transport.sender.shutdown_in_progress() {
-                    transport
-                        .sender
-                        .current_state_mut()
-                        .push_resize(cols.max(1) as i32, rows.max(1) as i32);
-                }
-                // Every guess was placed against the old geometry.
-                predictions.reset();
+                handle.send(Event::Resize(cols.max(1) as i32, rows.max(1) as i32));
             }
         }
 
         // Coming back from a stop, the terminal is as whoever held it meanwhile left it:
         // cooked, and showing their screen rather than ours.
         if pty::continued() {
-            pty::set_raw(stdin_fd)?;
-            out.write_all(display.open().as_bytes())?;
-            repaint_requested = true;
-        }
-
-        // Draw: the server's screen, with our guesses laid over it.
-        let mut new_state = transport.get_latest_remote_state().fb().clone();
-        predictions.cull(&new_state, now);
-        predictions.apply(&mut new_state);
-
-        let diff = display.new_frame(!repaint_requested, &local_framebuffer, &new_state);
-        if !diff.is_empty() {
-            out.write_all(diff.as_bytes())?;
-            out.flush()?;
-        }
-        repaint_requested = false;
-        local_framebuffer = new_state;
-
-        // The server signals it is leaving by moving to the shutdown state number. The
-        // client has to notice and shut down too, or it waits for a peer that is gone.
-        if transport.remote_state_num() == u64::MAX && !transport.sender.shutdown_in_progress() {
-            transport.sender.start_shutdown(now);
-        }
-
-        transport.tick(now);
-
-        if transport.sender.shutdown_in_progress()
-            && (transport.sender.shutdown_acknowledged()
-                || transport.sender.counterparty_shutdown_acknowledged()
-                || transport.sender.shutdown_ack_timed_out(now))
-        {
-            break;
+            let _ = pty::set_raw(stdin_fd);
+            handle.send(Event::Reopen);
         }
     }
-
-    out.write_all(display.close().as_bytes())?;
-    out.flush()?;
-    Ok(())
 }
