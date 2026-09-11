@@ -7,7 +7,7 @@
 //! without a live socket. Here [`ConnectionState`] holds that logic and is exercised
 //! directly; [`Connection`] adds the sockets around it.
 
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 use mosh_crypto::{Base64Key, CryptoError, Message, Session};
 
@@ -270,9 +270,15 @@ impl Connection {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
         let session = Session::new(&key);
 
-        let remote: SocketAddr = format!("{ip}:{port}")
-            .parse()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad address"))?;
+        // An address, not a name: joining it to the port as text would need brackets
+        // round an IPv6 one, and mosh-client is given the two separately anyway.
+        let address: IpAddr = ip.parse().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("bad address: {ip}"),
+            )
+        })?;
+        let remote = SocketAddr::new(address, port);
 
         let bind_addr = if remote.is_ipv6() {
             "[::]:0"
