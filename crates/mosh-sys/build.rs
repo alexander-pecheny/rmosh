@@ -1,4 +1,11 @@
 fn main() {
+    // iOS has no terminfo database, so src/terminfo.rs builds no lookups there and
+    // nothing needs linking; see that file.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
+        println!("cargo::rustc-check-cfg=cfg(has_utempter)");
+        return;
+    }
+
     // Mirrors configure.ac: prefer tinfo, fall back to ncurses, then curses.
     let terminfo = ["tinfo", "ncursesw", "ncurses"]
         .iter()
