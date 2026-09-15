@@ -248,12 +248,15 @@ impl Session {
         if self.transport.sender.shutdown_in_progress() {
             return;
         }
+        // Before predicting, not after: these bytes ride the frame after the last one
+        // sent, and a guess dated a frame early is judged against a screen that cannot
+        // show it yet, which throws away roughly every other prediction.
+        self.predictions
+            .set_local_frame_sent(self.transport.sender.sent_state_last());
         for &b in bytes {
             self.predictions.new_user_byte(b, &self.framebuffer, now);
             self.transport.sender.current_state_mut().push_byte(b);
         }
-        self.predictions
-            .set_local_frame_sent(self.transport.sender.sent_state_last());
     }
 
     fn resized(&mut self, cols: i32, rows: i32) {
