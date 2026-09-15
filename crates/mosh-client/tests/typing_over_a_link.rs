@@ -113,12 +113,11 @@ fn start_relay(server_port: u16) -> u16 {
     port
 }
 
-#[test]
-fn the_screen_keeps_up_with_the_keyboard() {
+/// A session against a server running `cat`, one round trip away.
+fn connect() -> (Server, Session) {
     mosh_sys::set_native_locale();
-    let (_server, server_port, key) = start_server();
+    let (server, server_port, key) = start_server();
     let port = start_relay(server_port);
-
     let session = Session::new(
         &key,
         "127.0.0.1",
@@ -132,6 +131,12 @@ fn the_screen_keeps_up_with_the_keyboard() {
         },
     )
     .expect("connect");
+    (server, session)
+}
+
+#[test]
+fn the_screen_keeps_up_with_the_keyboard() {
+    let (_server, session) = connect();
     let handle = session.handle();
 
     let typed_so_far = Arc::new(AtomicUsize::new(0));
@@ -186,5 +191,57 @@ fn the_screen_keeps_up_with_the_keyboard() {
         "the screen fell {} keystrokes behind the keyboard, showing {:?}",
         worst.0,
         worst.1
+    );
+}
+
+#[test]
+fn a_paste_is_not_predicted() {
+    let (_server, session) = connect();
+    let handle = session.handle();
+
+    let pasted = "z".repeat(150);
+    let sent = Arc::new(Mutex::new(None::<Instant>));
+    let stamp = Arc::clone(&sent);
+    let typist = thread::spawn(move || {
+        // Get the first epoch confirmed, or nothing would be shown whatever the rule.
+        handle.send(Event::Bytes(b"a".to_vec()));
+        thread::sleep(Duration::from_millis(800));
+        *stamp.lock().expect("stamp") = Some(Instant::now());
+        handle.send(Event::Bytes(pasted.into_bytes()));
+        thread::sleep(Duration::from_millis(1200));
+        handle.send(Event::Quit);
+    });
+
+    let mut emulator = Emulator::new(80, 24);
+    let mut first_seen: Option<Duration> = None;
+    session
+        .run(|bytes| {
+            emulator.input(bytes);
+            let mut screen = String::new();
+            for y in 0..2 {
+                for x in 0..80 {
+                    emulator
+                        .fb()
+                        .cell(y, x)
+                        .expect("cell")
+                        .print_grapheme(&mut screen);
+                }
+            }
+            if first_seen.is_none() && screen.contains('z') {
+                if let Some(at) = *sent.lock().expect("stamp") {
+                    first_seen = Some(at.elapsed());
+                }
+            }
+            Ok(())
+        })
+        .expect("session");
+    typist.join().expect("typist");
+
+    // The server cannot have echoed sooner than a round trip, so anything on screen
+    // before then was guessed.
+    let elapsed = first_seen.expect("the paste never reached the screen");
+    assert!(
+        elapsed >= LINK_DELAY,
+        "the paste was on screen after {elapsed:?}, before the server could have echoed it"
     );
 }

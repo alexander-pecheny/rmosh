@@ -20,6 +20,9 @@ use mosh_terminal::framebuffer::Framebuffer;
 
 use crate::prediction::{DisplayPreference, PredictionEngine};
 
+/// Bytes in one read above which the input is taken to be a paste, not typing.
+const PASTE_THRESHOLD: usize = 100;
+
 /// Everything the session must react to besides the network.
 pub enum Event {
     /// What the person typed.
@@ -248,13 +251,21 @@ impl Session {
         if self.transport.sender.shutdown_in_progress() {
             return;
         }
+        // Arriving faster than anyone types, so this is a paste rather than a keystroke,
+        // and what an application does with one is not worth guessing at.
+        let paste = bytes.len() > PASTE_THRESHOLD;
+        if paste {
+            self.predictions.reset();
+        }
         // Before predicting, not after: these bytes ride the frame after the last one
         // sent, and a guess dated a frame early is judged against a screen that cannot
         // show it yet, which throws away roughly every other prediction.
         self.predictions
             .set_local_frame_sent(self.transport.sender.sent_state_last());
         for &b in bytes {
-            self.predictions.new_user_byte(b, &self.framebuffer, now);
+            if !paste {
+                self.predictions.new_user_byte(b, &self.framebuffer, now);
+            }
             self.transport.sender.current_state_mut().push_byte(b);
         }
     }
