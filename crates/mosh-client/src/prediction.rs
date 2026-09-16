@@ -7,10 +7,15 @@
 //! usually means the model of the remote application was wrong, not that one character
 //! was mistyped.
 //!
-//! One departure from upstream: when guesses are abandoned, the keystrokes the server
-//! has not yet received are guessed again from its latest screen.
+//! Departures from upstream:
+//!
+//! - When guesses are abandoned, the keystrokes the server has not yet received are
+//!   guessed again from its latest screen.
+//! - Option-Backspace is predicted as a word erase. Upstream gives up on it.
+//! - A predicted erasure earns credit when the server makes it. Upstream credits no
+//!   blank prediction, so a run of deletions can never confirm an epoch.
 
-use mosh_terminal::framebuffer::Framebuffer;
+use mosh_terminal::framebuffer::{Cell, Framebuffer};
 use mosh_terminal::parser::{Kind, State, Utf8Parser};
 
 use crate::overlay::{
@@ -474,12 +479,13 @@ impl PredictionEngine {
         if self.last_byte == 0x1b && the_byte == b'O' {
             the_byte = b'[';
         }
-        // Option-Backspace. A VT parser ignores DEL in every state, which would leave
-        // this one mid-escape and swallow the next letter typed as an escape sequence.
+        // Option-Backspace, which erases the word to the left. A VT parser ignores DEL
+        // in every state, which would leave this one mid-escape and swallow the next
+        // letter typed as an escape sequence.
         if self.last_byte == 0x1b && the_byte == 0x7f {
             self.parser = Utf8Parser::new();
             self.last_byte = the_byte;
-            self.become_tentative();
+            self.predict_word_erase(fb, now);
             return;
         }
         self.last_byte = the_byte;
@@ -647,6 +653,46 @@ impl PredictionEngine {
         }
     }
 
+    /// What a cell will hold once every prediction so far has landed, or `None` where
+    /// a prediction says the cell changed without saying what it became.
+    fn predicted_cell<'a>(&'a self, fb: &'a Framebuffer, row: i32, col: i32) -> Option<&'a Cell> {
+        let cell = self
+            .overlays
+            .iter()
+            .find(|r| r.row_num == row)
+            .and_then(|r| r.overlay_cells.get(col as usize))
+            .filter(|c| c.base.active);
+        match cell {
+            Some(c) if c.unknown => None,
+            Some(c) => Some(&c.replacement),
+            None => fb.cell(row, col),
+        }
+    }
+
+    /// Erase back over any spaces and then over the word before them, which is what a
+    /// line editor does with this key. Where a word starts is a guess like any other: a
+    /// shell that counts punctuation differently will contradict it, and the epoch is
+    /// then abandoned as it is for any other wrong guess.
+    fn predict_word_erase(&mut self, fb: &Framebuffer, now: u64) {
+        self.init_cursor(fb);
+        let row = self.cursor().row;
+        // A cell whose contents we cannot see ends the word rather than being guessed
+        // past.
+        let space = |e: &Self, col: i32| e.predicted_cell(fb, row, col).map(Cell::is_blank);
+
+        let mut col = self.cursor().base.col;
+        while col > 0 && space(self, col - 1) == Some(true) {
+            col -= 1;
+        }
+        while col > 0 && space(self, col - 1) == Some(false) {
+            col -= 1;
+        }
+
+        for _ in col..self.cursor().base.col {
+            self.predict_backspace(fb, now);
+        }
+    }
+
     fn predict_backspace(&mut self, fb: &Framebuffer, now: u64) {
         let (row, col) = (self.cursor().row, self.cursor().base.col);
         if col <= 0 || row < 0 || row >= fb.ds.height() {
@@ -684,30 +730,29 @@ impl PredictionEngine {
 
         // Otherwise the rest of the row shifts left.
         for i in col..width {
-            let next_active = if i + 1 < width {
-                self.overlays[ri].overlay_cells[(i + 1) as usize]
-                    .base
-                    .active
-            } else {
-                false
+            let next = (i + 1 < width).then(|| &self.overlays[ri].overlay_cells[(i + 1) as usize]);
+            // What the cell will hold once the row has shifted, or `None` at the right
+            // edge, where what scrolls in is not knowable.
+            let shifted = match next {
+                _ if i + 2 >= width => None,
+                Some(next) if next.base.active => (!next.unknown).then(|| next.replacement.clone()),
+                _ => fb.cell(row, i + 1).cloned(),
             };
-            let next_unknown = if i + 1 < width {
-                self.overlays[ri].overlay_cells[(i + 1) as usize].unknown
-            } else {
-                false
-            };
-            let next_replacement = if i + 1 < width {
-                Some(
-                    self.overlays[ri].overlay_cells[(i + 1) as usize]
-                        .replacement
-                        .clone(),
-                )
-            } else {
-                None
-            };
-            let next_actual = fb.cell(row, i + 1).cloned();
-            let orig = fb.cell(row, i).cloned();
 
+            let cell = &self.overlays[ri].overlay_cells[i as usize];
+            // A guess that has not changed keeps the frame it was made for. Re-dating it
+            // would leave it too young to judge, and a run of deletions re-dates the
+            // whole tail of the row on every keystroke: nothing would ever be judged, no
+            // epoch confirmed, and deleting would wait for the server.
+            let unchanged = match &shifted {
+                Some(r) => !cell.unknown && *r == cell.replacement,
+                None => cell.unknown,
+            };
+            if cell.base.active && unchanged {
+                continue;
+            }
+
+            let orig = fb.cell(row, i).cloned();
             let cell = &mut self.overlays[ri].overlay_cells[i as usize];
             cell.reset_with_orig();
             cell.base.active = true;
@@ -716,26 +761,12 @@ impl PredictionEngine {
             if let Some(o) = orig {
                 cell.original_contents.push(o);
             }
-
-            if i + 2 < width {
-                if next_active {
-                    if next_unknown {
-                        cell.unknown = true;
-                    } else {
-                        cell.unknown = false;
-                        if let Some(r) = next_replacement {
-                            cell.replacement = r;
-                        }
-                    }
-                } else {
+            match shifted {
+                Some(r) => {
                     cell.unknown = false;
-                    if let Some(a) = next_actual {
-                        cell.replacement = a;
-                    }
+                    cell.replacement = r;
                 }
-            } else {
-                // What scrolls in from beyond the edge is not knowable.
-                cell.unknown = true;
+                None => cell.unknown = true,
             }
         }
     }
@@ -880,6 +911,63 @@ mod tests {
         let mut shown = fb.clone();
         e.apply(&mut shown);
         assert_eq!(shown.ds.cursor_col(), 0);
+    }
+
+    #[test]
+    fn option_backspace_erases_the_word_to_the_left() {
+        mosh_sys::set_native_locale();
+        let mut fb = Framebuffer::new(20, 4);
+        let mut e = primed(&mut fb);
+        for c in b"ick fox" {
+            e.new_user_byte(*c, &fb, 0);
+        }
+        for c in b"\x1b\x7f" {
+            e.new_user_byte(*c, &fb, 0);
+        }
+
+        let mut shown = fb.clone();
+        e.apply(&mut shown);
+        assert_eq!(screen_line(&shown, 0), "pick");
+        assert_eq!(shown.ds.cursor_col(), 5);
+    }
+
+    #[test]
+    fn option_backspace_erases_the_spaces_before_a_word_too() {
+        mosh_sys::set_native_locale();
+        let mut fb = Framebuffer::new(20, 4);
+        let mut e = primed(&mut fb);
+        for c in b"ick fox   " {
+            e.new_user_byte(*c, &fb, 0);
+        }
+        for c in b"\x1b\x7f" {
+            e.new_user_byte(*c, &fb, 0);
+        }
+
+        let mut shown = fb.clone();
+        e.apply(&mut shown);
+        assert_eq!(screen_line(&shown, 0), "pick");
+        assert_eq!(shown.ds.cursor_col(), 5);
+    }
+
+    #[test]
+    fn an_erasure_the_server_refuses_to_make_is_withdrawn() {
+        mosh_sys::set_native_locale();
+        let mut fb = Framebuffer::new(20, 4);
+        let mut e = primed(&mut fb);
+        // The server has echoed a letter, and an application that does no line editing
+        // will do nothing at all with the backspace that follows.
+        fb.mutable_cell(0, 1).append('x');
+        fb.ds.move_col(2, false, false);
+        e.new_user_byte(0x7f, &fb, 0);
+
+        e.set_local_frame_acked(1001);
+        e.set_local_frame_late_acked(1001);
+        e.cull(&fb, 0);
+
+        let mut shown = fb.clone();
+        e.apply(&mut shown);
+        assert_eq!(screen_line(&shown, 0), "px");
+        assert_eq!(shown.ds.cursor_col(), 2);
     }
 
     #[test]

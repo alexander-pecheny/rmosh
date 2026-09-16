@@ -209,8 +209,20 @@ impl ConditionalOverlayCell {
             return Validity::CorrectNoCredit;
         }
 
-        // Predicting a blank is too easy to be right by accident.
         if self.replacement.is_blank() {
+            // An erasure the server has not made yet. Its frame is acked, but the
+            // screen that carries the effect can trail that by a frame, and dropping
+            // the guess meanwhile would put the erased character back.
+            if !current.is_blank() {
+                return Validity::Pending;
+            }
+            // Predicting a blank is otherwise too easy to be right by accident, unless
+            // the cell held something when the guess was made -- then the guess was
+            // that the server would erase it, and being right about that is evidence
+            // like any other.
+            if self.original_contents.iter().any(|o| !o.is_blank()) {
+                return Validity::Correct;
+            }
             return Validity::CorrectNoCredit;
         }
 
@@ -310,6 +322,27 @@ mod tests {
         o.base.active = true;
         // Blank replacement: right far too easily to be evidence of anything.
         assert_eq!(o.get_validity(&fb, 0, 10), Validity::CorrectNoCredit);
+    }
+
+    #[test]
+    fn a_predicted_erasure_the_server_makes_earns_credit() {
+        let fb = Framebuffer::new(10, 3);
+        let mut o = ConditionalOverlayCell::new(5, 0, 0);
+        o.base.active = true;
+        // The cell held a letter when the erasure was guessed, and now holds nothing.
+        o.original_contents.push(cell_with("x"));
+        assert_eq!(o.get_validity(&fb, 0, 10), Validity::Correct);
+    }
+
+    #[test]
+    fn a_predicted_erasure_the_server_has_not_made_is_still_pending() {
+        let mut fb = Framebuffer::new(10, 3);
+        fb.mutable_cell(0, 0).append('x');
+        let mut o = ConditionalOverlayCell::new(5, 0, 0);
+        o.base.active = true;
+        o.original_contents.push(cell_with("x"));
+        // Dropping the guess here would put the erased character back on screen.
+        assert_eq!(o.get_validity(&fb, 0, 10), Validity::Pending);
     }
 
     #[test]

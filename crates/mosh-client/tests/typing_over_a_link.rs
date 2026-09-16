@@ -41,17 +41,17 @@ fn build_dir() -> std::path::PathBuf {
     dir
 }
 
-/// The wrapping editor example, built here because `cargo test --test` skips examples.
-fn wrapping_editor() -> std::path::PathBuf {
-    let path = build_dir().join("examples").join("wrapping_editor");
+/// An example server program, built here because `cargo test --test` skips examples.
+fn example(name: &str) -> String {
+    let path = build_dir().join("examples").join(name);
     if !path.exists() {
         let status = Command::new(env!("CARGO"))
-            .args(["build", "-p", "mosh-client", "--example", "wrapping_editor"])
+            .args(["build", "-p", "mosh-client", "--example", name])
             .status()
             .expect("cargo");
-        assert!(status.success(), "building the wrapping editor");
+        assert!(status.success(), "building the {name} example");
     }
-    path
+    path.to_str().expect("path").to_string()
 }
 
 /// A server running `command`.
@@ -230,8 +230,86 @@ fn the_screen_keeps_up_across_a_word_wrap() {
     // An input field that moves a half-typed word to the next line takes every guess
     // made about that word with it. The guesses for the keystrokes still in flight
     // have to be remade from where the word landed, or typing stalls until a pause.
-    let editor = wrapping_editor();
-    assert_keeps_up(editor.to_str().expect("path"), 3);
+    assert_keeps_up(&example("wrapping_editor"), 3);
+}
+
+/// Type [`TYPED`], then erase it with `key`, failing if the screen ever trails the
+/// keyboard by more than [`ALLOWED_LAG`].
+///
+/// `erase` says what one press of `key` leaves behind.
+fn assert_erasing_keeps_up(key: &[u8], erase: fn(&str) -> &str) {
+    let (_server, session) = connect(&example("line_editor"));
+
+    let mut steps = vec![TYPED.to_string()];
+    while !steps.last().expect("never empty").is_empty() {
+        let next = erase(steps.last().expect("never empty")).to_string();
+        steps.push(next);
+    }
+
+    let erased_so_far = Arc::new(AtomicUsize::new(0));
+    let handle = session.handle();
+    let counter = Arc::clone(&erased_so_far);
+    let presses = steps.len() - 1;
+    let key = key.to_vec();
+    let typist = thread::spawn(move || {
+        for b in TYPED.bytes() {
+            handle.send(Event::Bytes(vec![b]));
+            thread::sleep(KEYSTROKE_GAP);
+        }
+        // Let the server catch up, so erasing starts from a screen we know is right.
+        thread::sleep(Duration::from_millis(800));
+        // A key the client cannot model, as an arrow key or a control key is. It
+        // starts a fresh epoch, whose guesses are withheld until one of them is
+        // confirmed -- and a run of deletions has to be able to confirm one.
+        handle.send(Event::Bytes(vec![0x01]));
+        thread::sleep(KEYSTROKE_GAP);
+        for _ in 0..presses {
+            handle.send(Event::Bytes(key.clone()));
+            counter.fetch_add(1, Ordering::SeqCst);
+            thread::sleep(KEYSTROKE_GAP);
+        }
+        thread::sleep(Duration::from_millis(800));
+        handle.send(Event::Quit);
+    });
+
+    let letters = |s: &str| s.chars().filter(|c| *c != ' ').count();
+    let mut emulator = Emulator::new(80, 24);
+    let mut worst: (usize, String) = (0, String::new());
+    session
+        .run(|bytes| {
+            // Read the count before the screen, so a keystroke in flight counts as not
+            // yet pressed rather than as lag.
+            let erased = erased_so_far.load(Ordering::SeqCst);
+            emulator.input(bytes);
+            let text = screen_text(&emulator, 1);
+            let lag = letters(&text).saturating_sub(letters(&steps[erased]));
+            if lag > worst.0 {
+                worst = (lag, text);
+            }
+            Ok(())
+        })
+        .expect("session");
+    typist.join().expect("typist");
+    assert!(
+        worst.0 <= ALLOWED_LAG,
+        "the screen kept {} erased characters on screen, showing {:?}",
+        worst.0,
+        worst.1
+    );
+}
+
+#[test]
+fn the_screen_keeps_up_with_backspace() {
+    assert_erasing_keeps_up(&[0x7f], |s| &s[..s.len() - 1]);
+}
+
+#[test]
+fn the_screen_keeps_up_with_erasing_a_word() {
+    // Option-Backspace: the shell kills the word to the left of the cursor.
+    assert_erasing_keeps_up(&[0x1b, 0x7f], |s| {
+        let s = s.trim_end_matches(' ');
+        &s[..s.rfind(' ').map_or(0, |i| i + 1)]
+    });
 }
 
 #[test]
