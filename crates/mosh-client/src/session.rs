@@ -264,7 +264,8 @@ impl Session {
             .set_local_frame_sent(self.transport.sender.sent_state_last());
         for &b in bytes {
             if !paste {
-                self.predictions.new_user_byte(b, &self.framebuffer, now);
+                let server = self.transport.get_latest_remote_state().fb();
+                self.predictions.new_user_byte(b, server, now);
             }
             self.transport.sender.current_state_mut().push_byte(b);
         }

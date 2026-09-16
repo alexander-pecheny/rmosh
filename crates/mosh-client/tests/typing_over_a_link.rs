@@ -31,20 +31,33 @@ impl Drop for Server {
     }
 }
 
-/// The `mosh-server` built alongside this test, which sits beside the test binary.
-fn server_binary() -> std::path::PathBuf {
+/// The build directory holding this test, `mosh-server` and the examples.
+fn build_dir() -> std::path::PathBuf {
     let mut dir = std::env::current_exe().expect("test binary path");
     dir.pop();
     if dir.ends_with("deps") {
         dir.pop();
     }
-    dir.join("mosh-server")
+    dir
 }
 
-/// A server running `cat`, whose tty echoes each byte back exactly as typed.
-fn start_server() -> (Server, u16, String) {
-    let mut child = Command::new(server_binary())
-        .args(["new", "-i", "127.0.0.1", "--", "cat"])
+/// The wrapping editor example, built here because `cargo test --test` skips examples.
+fn wrapping_editor() -> std::path::PathBuf {
+    let path = build_dir().join("examples").join("wrapping_editor");
+    if !path.exists() {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p", "mosh-client", "--example", "wrapping_editor"])
+            .status()
+            .expect("cargo");
+        assert!(status.success(), "building the wrapping editor");
+    }
+    path
+}
+
+/// A server running `command`.
+fn start_server(command: &str) -> (Server, u16, String) {
+    let mut child = Command::new(build_dir().join("mosh-server"))
+        .args(["new", "-i", "127.0.0.1", "--", command])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -113,10 +126,10 @@ fn start_relay(server_port: u16) -> u16 {
     port
 }
 
-/// A session against a server running `cat`, one round trip away.
-fn connect() -> (Server, Session) {
+/// A session against a server running `command`, one round trip away.
+fn connect(command: &str) -> (Server, Session) {
     mosh_sys::set_native_locale();
-    let (server, server_port, key) = start_server();
+    let (server, server_port, key) = start_server(command);
     let port = start_relay(server_port);
     let session = Session::new(
         &key,
@@ -134,58 +147,70 @@ fn connect() -> (Server, Session) {
     (server, session)
 }
 
-#[test]
-fn the_screen_keeps_up_with_the_keyboard() {
-    let (_server, session) = connect();
-    let handle = session.handle();
+/// The text on the first `rows` rows of the screen, with runs of blanks collapsed.
+fn screen_text(emulator: &Emulator, rows: i32) -> String {
+    let mut text = String::new();
+    for y in 0..rows {
+        for x in 0..80 {
+            emulator
+                .fb()
+                .cell(y, x)
+                .expect("cell")
+                .print_grapheme(&mut text);
+        }
+        text.push(' ');
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
-    let typed_so_far = Arc::new(AtomicUsize::new(0));
-    let counter = Arc::clone(&typed_so_far);
-    let typist = thread::spawn(move || {
+/// Type [`TYPED`] one keystroke at a time, then quit.
+fn typist(handle: mosh_client::Handle, typed_so_far: Arc<AtomicUsize>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
         let mut bytes = TYPED.bytes();
         // Wait for the first echo: predictions start tentative and are withheld until
         // one has been confirmed, so the interesting frames come after that.
         handle.send(Event::Bytes(vec![bytes.next().expect("first byte")]));
-        counter.store(1, Ordering::SeqCst);
+        typed_so_far.store(1, Ordering::SeqCst);
         thread::sleep(Duration::from_millis(800));
         for b in bytes {
             handle.send(Event::Bytes(vec![b]));
-            counter.fetch_add(1, Ordering::SeqCst);
+            typed_so_far.fetch_add(1, Ordering::SeqCst);
             thread::sleep(KEYSTROKE_GAP);
         }
         thread::sleep(Duration::from_millis(800));
         handle.send(Event::Quit);
-    });
+    })
+}
+
+/// Type against `command` and fail if the screen ever trails the keyboard by more
+/// than [`ALLOWED_LAG`].
+fn assert_keeps_up(command: &str, rows: i32) {
+    let (_server, session) = connect(command);
+    let typed_so_far = Arc::new(AtomicUsize::new(0));
+    let typist = typist(session.handle(), Arc::clone(&typed_so_far));
 
     let mut emulator = Emulator::new(80, 24);
     let mut worst: (usize, String) = (0, String::new());
     session
         .run(|bytes| {
             emulator.input(bytes);
-            let mut line = String::new();
-            for x in 0..80 {
-                emulator
-                    .fb()
-                    .cell(0, x)
-                    .expect("cell")
-                    .print_grapheme(&mut line);
-            }
-            let line = line.trim_end().to_string();
+            let text = screen_text(&emulator, rows);
             assert!(
-                TYPED.starts_with(&line),
-                "the screen showed text that was never typed: {line:?}"
+                TYPED.starts_with(&text),
+                "the screen showed text that was never typed: {text:?}"
             );
-            let lag = typed_so_far
-                .load(Ordering::SeqCst)
-                .saturating_sub(line.chars().count());
+            // Blanks are left out of the count: a wrap may add some, and a space just
+            // typed shows as nothing.
+            let letters = |s: &str| s.chars().filter(|c| *c != ' ').count();
+            let typed = &TYPED[..typed_so_far.load(Ordering::SeqCst)];
+            let lag = letters(typed).saturating_sub(letters(&text));
             if lag > worst.0 {
-                worst = (lag, line);
+                worst = (lag, text);
             }
             Ok(())
         })
         .expect("session");
     typist.join().expect("typist");
-
     assert!(
         worst.0 <= ALLOWED_LAG,
         "the screen fell {} keystrokes behind the keyboard, showing {:?}",
@@ -195,8 +220,23 @@ fn the_screen_keeps_up_with_the_keyboard() {
 }
 
 #[test]
+fn the_screen_keeps_up_with_the_keyboard() {
+    // `cat`, whose tty echoes each byte back exactly as typed.
+    assert_keeps_up("cat", 1);
+}
+
+#[test]
+fn the_screen_keeps_up_across_a_word_wrap() {
+    // An input field that moves a half-typed word to the next line takes every guess
+    // made about that word with it. The guesses for the keystrokes still in flight
+    // have to be remade from where the word landed, or typing stalls until a pause.
+    let editor = wrapping_editor();
+    assert_keeps_up(editor.to_str().expect("path"), 3);
+}
+
+#[test]
 fn a_paste_is_not_predicted() {
-    let (_server, session) = connect();
+    let (_server, session) = connect("cat");
     let handle = session.handle();
 
     let pasted = "z".repeat(150);

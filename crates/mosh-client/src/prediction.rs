@@ -6,9 +6,12 @@
 //! belongs to is abandoned rather than the individual guess, because a wrong prediction
 //! usually means the model of the remote application was wrong, not that one character
 //! was mistyped.
+//!
+//! One departure from upstream: when guesses are abandoned, the keystrokes the server
+//! has not yet received are guessed again from its latest screen.
 
 use mosh_terminal::framebuffer::Framebuffer;
-use mosh_terminal::parser::{Kind, Utf8Parser};
+use mosh_terminal::parser::{Kind, State, Utf8Parser};
 
 use crate::overlay::{
     ConditionalCursorMove, ConditionalOverlayCell, ConditionalOverlayRow, Validity,
@@ -32,6 +35,9 @@ const GLITCH_REPAIR_MININTERVAL: u64 = 150;
 /// Outstanding this long and predictions get underlined.
 const GLITCH_FLAG_THRESHOLD: u64 = 5000;
 
+/// Keystrokes awaiting an echo before guessing stops, which is a link that is down.
+const MAX_IN_FLIGHT: usize = 256;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayPreference {
     Always,
@@ -40,12 +46,26 @@ pub enum DisplayPreference {
     Experimental,
 }
 
+/// A keystroke the server has not echoed yet.
+struct Keystroke {
+    byte: u8,
+    /// Typed as text, rather than as part of a control sequence.
+    text: bool,
+    /// The frame that carries it.
+    frame: u64,
+    at: u64,
+    epoch: u64,
+}
+
 pub struct PredictionEngine {
     last_byte: u8,
     parser: Utf8Parser,
 
     overlays: Vec<ConditionalOverlayRow>,
     cursors: Vec<ConditionalCursorMove>,
+    in_flight: Vec<Keystroke>,
+    /// The newest keystroke the server has received, when it was text.
+    received: Option<char>,
 
     local_frame_sent: u64,
     local_frame_acked: u64,
@@ -83,6 +103,8 @@ impl PredictionEngine {
             parser: Utf8Parser::new(),
             overlays: Vec::new(),
             cursors: Vec::new(),
+            in_flight: Vec::new(),
+            received: None,
             local_frame_sent: 0,
             local_frame_acked: 0,
             local_frame_late_acked: 0,
@@ -167,6 +189,7 @@ impl PredictionEngine {
     pub fn reset(&mut self) {
         self.cursors.clear();
         self.overlays.clear();
+        self.in_flight.clear();
         self.become_tentative();
     }
 
@@ -174,6 +197,17 @@ impl PredictionEngine {
     fn become_tentative(&mut self) {
         if self.display_preference != DisplayPreference::Experimental {
             self.prediction_epoch += 1;
+        }
+    }
+
+    /// Start a new epoch and move every keystroke guessed from `epoch` on into it, so
+    /// the guesses are held back until one of them proves right.
+    fn abandon(&mut self, epoch: u64) {
+        self.become_tentative();
+        for k in &mut self.in_flight {
+            if k.epoch >= epoch {
+                k.epoch = self.prediction_epoch;
+            }
         }
     }
 
@@ -213,29 +247,32 @@ impl PredictionEngine {
         }
     }
 
-    /// Abandon a whole epoch of predictions, then start another.
-    fn kill_epoch(&mut self, epoch: u64, fb: &Framebuffer) {
-        self.cursors
-            .retain(|c| !c.base.tentative(epoch.saturating_sub(1)));
+    /// Guess afresh, from the server's screen, for every keystroke still in flight.
+    ///
+    /// Upstream keeps its guesses and only re-anchors the cursor, at wherever the
+    /// server's cursor was, which is stale by every keystroke still in flight; one
+    /// wrong guess then breeds another until the typist pauses.
+    fn rebuild(&mut self, fb: &Framebuffer) {
+        self.overlays.clear();
+        self.cursors.clear();
+        // A keystroke the server has received is on its screen already, in all
+        // likelihood, and the cursor sits after it.
+        let acked = self.local_frame_acked;
+        self.in_flight.retain(|k| k.frame > acked);
 
-        let mut c = ConditionalCursorMove::new(
-            self.local_frame_sent + 1,
-            fb.ds.cursor_row(),
-            fb.ds.cursor_col(),
-            self.prediction_epoch,
-        );
-        c.base.active = true;
-        self.cursors.push(c);
-
-        for row in &mut self.overlays {
-            for cell in &mut row.overlay_cells {
-                if cell.base.tentative(epoch.saturating_sub(1)) {
-                    cell.reset();
-                }
-            }
+        let (sent, epoch) = (self.local_frame_sent, self.prediction_epoch);
+        let (parser, last_byte) = (std::mem::take(&mut self.parser), self.last_byte);
+        let keystrokes = std::mem::take(&mut self.in_flight);
+        for k in &keystrokes {
+            self.local_frame_sent = k.frame - 1;
+            self.prediction_epoch = k.epoch;
+            self.predict(k.byte, fb, k.at);
         }
-
-        self.become_tentative();
+        self.in_flight = keystrokes;
+        self.local_frame_sent = sent;
+        self.prediction_epoch = epoch;
+        self.parser = parser;
+        self.last_byte = last_byte;
     }
 
     /// Index of the overlay row for `row_num`, creating it if needed.
@@ -249,6 +286,20 @@ impl PredictionEngine {
         }
         self.overlays.push(r);
         self.overlays.len() - 1
+    }
+
+    /// Is the newest character the server has received sitting just left of its
+    /// cursor? Then the application is still echoing, and a guess that went wrong was
+    /// wrong about layout, not about whether typing shows up at all.
+    fn echo_evident(&self, fb: &Framebuffer) -> bool {
+        let (row, col) = (fb.ds.cursor_row(), fb.ds.cursor_col());
+        let Some(received) = self.received else {
+            return false;
+        };
+        col > 0
+            && fb
+                .cell(row, col - 1)
+                .is_some_and(|c| c.contents().chars().eq([received]))
     }
 
     /// Judge outstanding predictions against what the server actually sent.
@@ -366,46 +417,70 @@ impl PredictionEngine {
             }
         }
 
-        if full_reset {
-            self.reset();
-            return;
-        }
-        if let Some(epoch) = kill {
-            self.kill_epoch(epoch, fb);
-        }
-
         // A wrong cursor prediction is as damning as a wrong cell.
-        if !self.cursors.is_empty()
-            && self.cursor().get_validity(fb, self.local_frame_late_acked) == Validity::Incorrect
-        {
-            if self.display_preference == DisplayPreference::Experimental {
+        let cursor_wrong = !self.cursors.is_empty()
+            && self.cursor().get_validity(fb, self.local_frame_late_acked) == Validity::Incorrect;
+
+        let (acked, late_acked) = (self.local_frame_acked, self.local_frame_late_acked);
+        if let Some(k) = self.in_flight.iter().rev().find(|k| k.frame <= acked) {
+            self.received = k.text.then_some(k.byte as char);
+        }
+        self.in_flight.retain(|k| k.frame > late_acked);
+
+        if self.display_preference == DisplayPreference::Experimental {
+            if cursor_wrong {
                 self.cursors.clear();
-            } else {
-                self.reset();
-                return;
             }
+        } else if full_reset || cursor_wrong {
+            if !self.echo_evident(fb) {
+                self.abandon(0);
+            }
+            self.rebuild(fb);
+        } else if let Some(epoch) = kill {
+            self.abandon(epoch);
+            self.rebuild(fb);
         }
 
-        let late_acked = self.local_frame_late_acked;
         self.cursors
             .retain(|c| c.get_validity(fb, late_acked) == Validity::Pending);
     }
 
     /// Take one byte the user typed and predict what it will do.
-    pub fn new_user_byte(&mut self, mut the_byte: u8, fb: &Framebuffer, now: u64) {
+    pub fn new_user_byte(&mut self, the_byte: u8, fb: &Framebuffer, now: u64) {
         if self.display_preference == DisplayPreference::Never {
             return;
         }
         if self.display_preference == DisplayPreference::Experimental {
             self.prediction_epoch = self.confirmed_epoch;
         }
-
         self.cull(fb, now);
+        if self.in_flight.len() >= MAX_IN_FLIGHT {
+            self.reset();
+        }
 
+        self.in_flight.push(Keystroke {
+            byte: the_byte,
+            text: self.parser.state() == State::Ground && (0x21..=0x7e).contains(&the_byte),
+            frame: self.local_frame_sent + 1,
+            at: now,
+            epoch: self.prediction_epoch,
+        });
+        self.predict(the_byte, fb, now);
+    }
+
+    fn predict(&mut self, mut the_byte: u8, fb: &Framebuffer, now: u64) {
         // Rewrite an application-mode cursor key into its ANSI form, so the arrow
         // handling below sees one spelling rather than two.
         if self.last_byte == 0x1b && the_byte == b'O' {
             the_byte = b'[';
+        }
+        // Option-Backspace. A VT parser ignores DEL in every state, which would leave
+        // this one mid-escape and swallow the next letter typed as an escape sequence.
+        if self.last_byte == 0x1b && the_byte == 0x7f {
+            self.parser = Utf8Parser::new();
+            self.last_byte = the_byte;
+            self.become_tentative();
+            return;
         }
         self.last_byte = the_byte;
 
@@ -1022,5 +1097,71 @@ mod tests {
 
         e.new_user_byte(b'x', &fb, 0);
         assert_eq!(e.wait_time(), 50, "a timing trigger could still fire");
+    }
+
+    /// A primed engine with "wh" carried by frame 1001 and "er" by frame 1002.
+    fn typing_wher(fb: &Framebuffer, e: &mut PredictionEngine) {
+        for c in b"wh" {
+            e.new_user_byte(*c, fb, 0);
+        }
+        e.set_local_frame_sent(1001);
+        for c in b"er" {
+            e.new_user_byte(*c, fb, 0);
+        }
+    }
+
+    #[test]
+    fn keystrokes_still_in_flight_are_guessed_again_from_the_servers_cursor() {
+        mosh_sys::set_native_locale();
+        let mut fb = Framebuffer::new(20, 4);
+        let mut e = primed(&mut fb);
+        typing_wher(&fb, &mut e);
+
+        // The application wrapped the word onto the next row. The server's screen
+        // shows the part it has echoed so far, with its cursor after it.
+        let mut server = Framebuffer::new(20, 4);
+        server.mutable_cell(0, 0).append('p');
+        server.mutable_cell(1, 0).append('w');
+        server.mutable_cell(1, 1).append('h');
+        server.ds.move_row(1, false);
+        server.ds.move_col(2, false, false);
+        e.set_local_frame_acked(1001);
+        e.set_local_frame_late_acked(1001);
+        e.cull(&server, 0);
+
+        let mut shown = server.clone();
+        e.apply(&mut shown);
+        assert_eq!(screen_line(&shown, 0), "p");
+        assert_eq!(screen_line(&shown, 1), "wher");
+        assert_eq!((shown.ds.cursor_row(), shown.ds.cursor_col()), (1, 4));
+    }
+
+    #[test]
+    fn guesses_are_withheld_again_when_the_server_shows_no_echo() {
+        mosh_sys::set_native_locale();
+        let mut fb = Framebuffer::new(20, 4);
+        let mut e = primed(&mut fb);
+        typing_wher(&fb, &mut e);
+
+        // The server took the keystrokes and showed nothing for them.
+        e.set_local_frame_acked(1001);
+        e.set_local_frame_late_acked(1001);
+        e.cull(&fb, 0);
+
+        let mut shown = fb.clone();
+        e.apply(&mut shown);
+        assert_eq!(screen_line(&shown, 0), "p");
+        assert_eq!(shown.ds.cursor_col(), 1);
+    }
+
+    #[test]
+    fn a_letter_typed_after_option_backspace_is_still_guessed() {
+        mosh_sys::set_native_locale();
+        let mut e = engine_showing();
+        let fb = Framebuffer::new(20, 4);
+        for c in b"\x1b\x7fx" {
+            e.new_user_byte(*c, &fb, 0);
+        }
+        assert!(e.active(), "the letter was swallowed as an escape sequence");
     }
 }
