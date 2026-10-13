@@ -215,10 +215,11 @@ pub fn connect(key: &str, ip: &str, port: u16) -> std::io::Result<i32> {
             }
         }
         if let Some(got) = received(&mut transport, &mut last_remote) {
-            std::io::stdout().lock().write_all(&got.out)?;
-            std::io::stdout().flush()?;
-            std::io::stderr().lock().write_all(&got.err)?;
-            if got.end.is_some() {
+            let mut stdout = std::io::stdout().lock();
+            let wrote = stdout.write_all(&got.out).and_then(|()| stdout.flush());
+            let _ = std::io::stderr().lock().write_all(&got.err);
+            // Nobody reading what we print, as when whoever started us has died, ends the pipe.
+            if got.end.is_some() || wrote.is_err() {
                 status = got.end;
                 transport.sender.start_shutdown(now);
             }
