@@ -1,0 +1,12 @@
+[package]
+name = "mosh-pipe"
+description = "A command's stdin, stdout and stderr carried over mosh's roaming transport."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+mosh-network = { path = "../mosh-network" }
+mosh-sys = { path = "../mosh-sys" }

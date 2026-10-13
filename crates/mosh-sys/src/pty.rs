@@ -397,7 +397,9 @@ pub fn poll_readable(fds: &[RawFd], timeout_ms: i32) -> std::io::Result<Vec<usiz
     Ok(pollfds
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0)
+        // macOS cannot poll a device such as /dev/null and flags it invalid at once; reading
+        // it is what tells the caller what it holds, where ignoring it would spin.
+        .filter(|(_, p)| p.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0)
         .map(|(i, _)| i)
         .collect())
 }

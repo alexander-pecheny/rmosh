@@ -25,7 +25,7 @@ pub fn locale_from_env() -> Vec<(String, String)> {
 /// The arguments the far end's mosh-server should receive. Both ends must agree on
 /// character widths, so `locale` is carried across rather than left to the remote login.
 pub fn server_args(o: &Opts, locale: &[(String, String)]) -> Vec<String> {
-    let mut server: Vec<String> = vec!["new".into()];
+    let mut server: Vec<String> = vec![if o.pipe { "pipe" } else { "new" }.into()];
 
     server.push("-c".into());
     server.push(colors().to_string());

@@ -176,7 +176,10 @@ fn run(o: Opts) -> std::io::Result<()> {
     } else {
         let mut cmd = Command::new(&o.ssh[0]);
         cmd.args(&o.ssh[1..]);
-        if o.ssh_pty {
+        if o.pipe {
+            // Our stdin belongs to the pipe, not to ssh.
+            cmd.stdin(Stdio::null());
+        } else if o.ssh_pty {
             cmd.arg("-t");
         }
         match o.family.as_str() {
@@ -228,6 +231,8 @@ fn run(o: Opts) -> std::io::Result<()> {
     // and a login banner in any encoding but UTF-8 would otherwise end the connection
     // before the handshake was ever reached. The Perl reads bytes for the same reason.
     let mut stdout = BufReader::new(stdout);
+    // A pipe's stderr is the command's, so the shell's chatter is kept back unless it explains a failure.
+    let mut chatter = Vec::new();
     while !found.complete() {
         let mut raw = Vec::new();
         if stdout.read_until(b'\n', &mut raw)? == 0 {
@@ -236,6 +241,7 @@ fn run(o: Opts) -> std::io::Result<()> {
         let line = String::from_utf8_lossy(&raw);
         let line = line.trim_end_matches('\n').trim_end_matches('\r');
         match found.line(line) {
+            Ok(Some(text)) if o.pipe => chatter.push(text.to_string()),
             Ok(Some(text)) => println!("{text}"),
             Ok(None) => {}
             Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
@@ -245,12 +251,14 @@ fn run(o: Opts) -> std::io::Result<()> {
     let _ = child.wait();
 
     let Some((port, key)) = found.connect.clone() else {
+        chatter.iter().for_each(|line| eprintln!("{line}"));
         return Err(std::io::Error::other(
             "Did not find mosh server startup message.",
         ));
     };
     if found.ip.is_none() {
         match found.ssh_connection_ip.as_deref() {
+            Some(_) if o.pipe => {}
             Some(ip) => eprintln!(
                 "mosh: Using remote IP address {ip} from $SSH_CONNECTION for hostname {userhost}"
             ),
@@ -265,6 +273,10 @@ fn run(o: Opts) -> std::io::Result<()> {
         .target()
         .expect("a target, checked just above")
         .to_string();
+
+    if o.pipe {
+        std::process::exit(mosh_pipe::connect(&key, &target, port)?);
+    }
 
     // The key goes across in the environment rather than on the command line, so it
     // never appears in the process table.

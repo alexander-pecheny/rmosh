@@ -15,6 +15,8 @@ pub struct Args {
     pub locale_vars: Vec<(String, String)>,
     pub help: bool,
     pub version: bool,
+    /// `pipe` in place of `new`: carry the command's standard streams, not a terminal.
+    pub pipe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +64,8 @@ pub fn parse(argv: &[String]) -> Result<Args, ArgError> {
     }
     let opts = &argv[..opts_end];
 
-    if opts.len() >= 2 && opts[1] == "new" {
+    if opts.len() >= 2 && (opts[1] == "new" || opts[1] == "pipe") {
+        args.pipe = opts[1] == "pipe";
         // A hand-rolled getopt over "@:i:p:c:svl:". Bundling matters: the test harness
         // passes -vv, which getopt reads as two v flags, and a value may be attached
         // to its letter (-c256) or separate (-c 256).
@@ -138,7 +141,7 @@ fn ssh_ip() -> Option<String> {
 }
 
 pub const USAGE: &str = "\
-Usage: mosh-server new [-s] [-v] [-i LOCALADDR] [-p PORT[:PORT2]] [-c COLORS] [-l NAME=VALUE] [-- COMMAND...]";
+Usage: mosh-server new|pipe [-s] [-v] [-i LOCALADDR] [-p PORT[:PORT2]] [-c COLORS] [-l NAME=VALUE] [-- COMMAND...]";
 
 #[cfg(test)]
 mod tests {
