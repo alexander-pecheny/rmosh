@@ -127,6 +127,10 @@ fn run(args: args::Args) -> std::io::Result<()> {
         let _ = pty::close_standard_streams();
     }
 
+    if args.pipe {
+        return mosh_pipe::serve(connection, &args.command);
+    }
+
     let terminal = Complete::new(cols as i32, rows as i32);
     let mut transport = Transport::new(connection, terminal, UserStream::new(), now);
     transport.verbose = args.verbose;

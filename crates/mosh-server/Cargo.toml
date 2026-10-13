@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 mosh-network = { path = "../mosh-network" }
+mosh-pipe = { path = "../mosh-pipe" }
 mosh-state = { path = "../mosh-state" }
 mosh-sys = { path = "../mosh-sys" }
 mosh-terminal = { path = "../mosh-terminal" }

@@ -15,4 +15,5 @@ name = "mosh"
 path = "src/main.rs"
 
 [dependencies]
+mosh-pipe = { path = "../mosh-pipe" }
 mosh-sys = { path = "../mosh-sys" }

@@ -27,6 +27,8 @@ pub struct Opts {
     pub userhost: Option<String>,
     /// A command to run instead of the login shell.
     pub command: Vec<String>,
+    /// Carry the command's standard streams instead of a terminal.
+    pub pipe: bool,
 }
 
 impl Default for Opts {
@@ -49,6 +51,7 @@ impl Default for Opts {
             remote_ip: "proxy".into(),
             userhost: None,
             command: Vec::new(),
+            pipe: false,
         }
     }
 }
@@ -191,6 +194,7 @@ pub fn parse(argv: &[String]) -> Result<Opts, OptError> {
                 o.remote_ip = v;
             }
             "--fake-proxy" => o.fake_proxy = true,
+            "--pipe" => o.pipe = true,
             "--no-fake-proxy" => o.fake_proxy = false,
             "--help" => o.help = true,
             "--version" => o.version = true,
@@ -284,6 +288,8 @@ Usage: mosh [options] [--] [user@]host [command...]
         --no-ssh-pty         do not allocate a pty on the ssh connection
         --no-init            do not send terminal initialization string
         --local              run mosh-server locally without using ssh
+        --pipe               carry the command's stdin, stdout and stderr
+                             instead of a terminal
         --experimental-remote-ip=(local|remote|proxy)  select the method for
                              discovering the remote IP address to use for mosh
                              (default: \"proxy\")

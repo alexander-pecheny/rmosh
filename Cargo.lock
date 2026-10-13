@@ -280,6 +280,7 @@ dependencies = [
 name = "mosh"
 version = "1.4.0"
 dependencies = [
+ "mosh-pipe",
  "mosh-sys",
 ]
 
@@ -313,6 +314,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosh-pipe"
+version = "1.4.0"
+dependencies = [
+ "libc",
+ "mosh-network",
+ "mosh-sys",
+]
+
+[[package]]
 name = "mosh-protobufs"
 version = "1.4.0"
 dependencies = [
@@ -325,6 +335,7 @@ name = "mosh-server"
 version = "1.4.0"
 dependencies = [
  "mosh-network",
+ "mosh-pipe",
  "mosh-state",
  "mosh-sys",
  "mosh-terminal",
