@@ -30,6 +30,7 @@ const CLIENT_GONE: u64 = 24 * 3600 * 1000;
 /// The client gives up after this long awake without hearing from the server. Time
 /// asleep does not count, so a laptop that sleeps through the night picks up where it was.
 const SERVER_LOST: Duration = Duration::from_secs(20);
+const SUSPENDED: Duration = Duration::from_secs(5);
 /// How long a command has to finish once its input is closed, before it is killed.
 const GRACE: Duration = Duration::from_millis(500);
 /// The state number a peer moves to when it is leaving.
@@ -172,6 +173,19 @@ pub fn serve(connection: Connection, command: &[String]) -> std::io::Result<()> 
     Ok(())
 }
 
+/// How following a server ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ending {
+    /// The command exited with this status.
+    Exited(i32),
+    /// `stop` asked us to leave.
+    Stopped,
+    /// The server left before its command ended.
+    ServerEnded,
+    /// The server never answered, or stopped answering; the text says which.
+    Lost(String),
+}
+
 /// Follows the server at `ip`:`port` until its command ends or a signal stops us, writing
 /// what it prints to our own stdout and stderr and passing our stdin to it. Returns the command's exit
 /// status, or 255 when the server stopped answering or never did.
@@ -179,32 +193,69 @@ pub fn connect(key: &str, ip: &str, port: u16) -> std::io::Result<i32> {
     for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
         pty::catch_termination(sig);
     }
+    let output = |got: &Stream| {
+        let mut stdout = std::io::stdout().lock();
+        let wrote = stdout.write_all(&got.out).and_then(|()| stdout.flush());
+        let _ = std::io::stderr().lock().write_all(&got.err);
+        wrote.is_ok()
+    };
+    Ok(match follow(key, ip, port, &mut std::io::stdin(), pty::termination_requested, output)? {
+        Ending::Exited(status) => status,
+        Ending::Stopped => 0,
+        Ending::ServerEnded => {
+            eprintln!("mosh: the server ended the pipe");
+            1
+        }
+        Ending::Lost(why) => {
+            eprintln!("mosh: {why}");
+            255
+        }
+    })
+}
+
+/// Follows the server at `ip`:`port` until its command ends or `stop` says to leave. What
+/// it prints goes to `output`, which returns false once nobody reads it; `input` goes to the
+/// command, and its end closes the command's input.
+pub fn follow(
+    key: &str,
+    ip: &str,
+    port: u16,
+    input: &mut (impl Read + AsRawFd),
+    stop: impl Fn() -> bool,
+    mut output: impl FnMut(&Stream) -> bool,
+) -> std::io::Result<Ending> {
     let now = pty::now_ms();
     let connection = Connection::new_client(key, ip, port, now)?;
     let mut transport = Transport::new(connection, Stream::default(), Stream::default(), now);
     let mut last_remote = 0;
     let mut heard = Instant::now();
+    let mut turned = Instant::now();
     let mut ever_heard = false;
     let mut status = None;
-    let mut stdin_open = true;
+    let mut input_open = true;
     let mut buf = [0u8; 16384];
-    let stdin = std::io::stdin();
 
     loop {
         let now = pty::now_ms();
-        if pty::termination_requested() && !transport.sender.shutdown_in_progress() {
+        if stop() && !transport.sender.shutdown_in_progress() {
             transport.sender.start_shutdown(now);
         }
         let wait = transport.wait_time(now).min(1000) as i32;
         let mut fds: Vec<RawFd> = transport.connection.sockets().iter().map(|s| s.as_raw_fd()).collect();
         let network = fds.len();
-        let reading = stdin_open && !transport.sender.shutdown_in_progress();
+        let reading = input_open && !transport.sender.shutdown_in_progress();
         if reading {
-            fds.push(stdin.as_raw_fd());
+            fds.push(input.as_raw_fd());
         }
 
         let ready = pty::poll_readable(&fds, wait.max(0))?;
         let now = pty::now_ms();
+        // A turn far longer than any wait means we were frozen, as an app is in the
+        // background, and the server cannot be blamed for the silence.
+        if turned.elapsed() > SUSPENDED {
+            heard = Instant::now();
+        }
+        turned = Instant::now();
 
         if ready.iter().any(|&i| i < network) {
             while let Some(result) = transport.recv(now) {
@@ -215,11 +266,8 @@ pub fn connect(key: &str, ip: &str, port: u16) -> std::io::Result<i32> {
             }
         }
         if let Some(got) = received(&mut transport, &mut last_remote) {
-            let mut stdout = std::io::stdout().lock();
-            let wrote = stdout.write_all(&got.out).and_then(|()| stdout.flush());
-            let _ = std::io::stderr().lock().write_all(&got.err);
             // Nobody reading what we print, as when whoever started us has died, ends the pipe.
-            if got.end.is_some() || wrote.is_err() {
+            if !output(&got) || got.end.is_some() {
                 status = got.end;
                 transport.sender.start_shutdown(now);
             }
@@ -230,10 +278,10 @@ pub fn connect(key: &str, ip: &str, port: u16) -> std::io::Result<i32> {
 
         if reading && ready.contains(&network) {
             // As over ssh, the end of our input closes the command's, and leaves it running.
-            match read_ready(&mut stdin.lock(), &mut buf) {
+            match read_ready(input, &mut buf) {
                 Some(n) => transport.sender.current_state_mut().out.extend_from_slice(&buf[..n]),
                 None => {
-                    stdin_open = false;
+                    input_open = false;
                     transport.sender.current_state_mut().end = Some(0);
                 }
             }
@@ -244,21 +292,17 @@ pub fn connect(key: &str, ip: &str, port: u16) -> std::io::Result<i32> {
             break;
         }
         if heard.elapsed() > SERVER_LOST {
-            if ever_heard {
-                eprintln!("mosh: {ip} stopped answering over UDP");
+            let (low, high) = (mosh_network::connection::PORT_RANGE_LOW, mosh_network::connection::PORT_RANGE_HIGH);
+            return Ok(Ending::Lost(if ever_heard {
+                format!("{ip} stopped answering over UDP")
             } else {
-                let (low, high) = (mosh_network::connection::PORT_RANGE_LOW, mosh_network::connection::PORT_RANGE_HIGH);
-                eprintln!("mosh: {ip} never answered over UDP. Open ports {low}-{high}/udp in its firewall.");
-            }
-            return Ok(255);
+                format!("{ip} never answered over UDP. Open ports {low}-{high}/udp in its firewall.")
+            }));
         }
     }
-    Ok(status.unwrap_or_else(|| {
-        if pty::termination_requested() {
-            0
-        } else {
-            eprintln!("mosh: the server ended the pipe");
-            1
-        }
-    }))
+    Ok(match status {
+        Some(status) => Ending::Exited(status),
+        None if stop() => Ending::Stopped,
+        None => Ending::ServerEnded,
+    })
 }
